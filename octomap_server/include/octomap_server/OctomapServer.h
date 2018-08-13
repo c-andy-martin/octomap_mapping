@@ -73,6 +73,8 @@
 #include <octomap/ColorOcTree.h>
 #endif
 
+#include <octomap_server/OcTreeStampedWithExpiry.h>
+
 namespace octomap_server {
 class OctomapServer {
 
@@ -84,7 +86,7 @@ public:
 #else
   typedef pcl::PointXYZ PCLPoint;
   typedef pcl::PointCloud<pcl::PointXYZ> PCLPointCloud;
-  typedef octomap::OcTree OcTreeT;
+  typedef octomap_server::OcTreeStampedWithExpiry OcTreeT;
 #endif
   typedef octomap_msgs::GetOctomap OctomapSrv;
   typedef octomap_msgs::BoundingBoxQuery BBXSrv;
@@ -292,6 +294,7 @@ protected:
   std::string m_worldFrameId; // the map frame
   std::string m_baseFrameId; // base of the robot for ground plane filtering
   bool m_useHeightMap;
+  bool m_useTimedMap;
   std_msgs::ColorRGBA m_color;
   std_msgs::ColorRGBA m_colorFree;
   double m_colorFactor;
@@ -337,6 +340,10 @@ protected:
   unsigned m_multires2DScale;
   bool m_projectCompleteMap;
   bool m_useColoredMap;
+
+  // time-based degrading
+  double m_expirePeriod;
+  ros::Time m_expireLastTime;
 };
 }
 

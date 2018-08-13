@@ -47,6 +47,7 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   m_maxRange(-1.0),
   m_worldFrameId("/map"), m_baseFrameId("base_footprint"),
   m_useHeightMap(true),
+  m_useTimedMap(false),
   m_useColoredMap(false),
   m_colorFactor(0.8),
   m_latchedTopics(true),
@@ -71,7 +72,9 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   m_compressPeriod(0.0),
   m_compressLastTime(ros::Time::now()),
   m_incrementalUpdate(false),
-  m_initConfig(true)
+  m_initConfig(true),
+  m_expirePeriod(0.0),
+  m_expireLastTime(ros::Time::now())
 {
   double probHit, probMiss, thresMin, thresMax;
 
@@ -79,6 +82,7 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   private_nh.param("frame_id", m_worldFrameId, m_worldFrameId);
   private_nh.param("base_frame_id", m_baseFrameId, m_baseFrameId);
   private_nh.param("height_map", m_useHeightMap, m_useHeightMap);
+  private_nh.param("timed_map", m_useTimedMap, m_useTimedMap);
   private_nh.param("colored_map", m_useColoredMap, m_useColoredMap);
   private_nh.param("color_factor", m_colorFactor, m_colorFactor);
 
@@ -119,6 +123,9 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   private_nh.param("compress_period", m_compressPeriod, m_compressPeriod);
   private_nh.param("incremental_2D_projection", m_incrementalUpdate, m_incrementalUpdate);
 
+  // only enabled when expireTimeDelta is positive
+  private_nh.param("expire_time_delta", m_expirePeriod, m_expirePeriod);
+
   if (m_filterGroundPlane && (m_pointcloudMinZ > 0.0 || m_pointcloudMaxZ < 0.0)){
     ROS_WARN_STREAM("You enabled ground filtering but incoming pointclouds will be pre-filtered in ["
               <<m_pointcloudMinZ <<", "<< m_pointcloudMaxZ << "], excluding the ground level z=0. "
@@ -138,6 +145,16 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
 #endif
   }
 
+  if (m_useHeightMap && m_useTimedMap) {
+    ROS_WARN_STREAM("You enabled both height map and timed map. This is contradictory. Defaulting to height map.");
+    m_useTimedMap = false;
+  }
+
+  if (m_useColoredMap && m_useTimedMap) {
+    ROS_WARN_STREAM("You enabled both colored map and timed map. This is contradictory. Defaulting to colored map.");
+    m_useTimedMap = false;
+  }
+
 
   // initialize octomap object & params
   m_octree = new OcTreeT(m_res);
@@ -148,6 +165,15 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   m_treeDepth = m_octree->getTreeDepth();
   m_maxTreeDepth = m_treeDepth;
   m_gridmap.info.resolution = m_res;
+
+  double a_coeff, c_coeff, quadratic_start, c_coeff_free;
+  private_nh.param("expiry/a_coeff", a_coeff, 1.0 / 25.0);
+  private_nh.param("expiry/c_coeff", c_coeff, 2.0);
+  private_nh.param("expiry/quadratic_start", quadratic_start, 30.0);
+  private_nh.param("expiry/c_coeff_free", c_coeff_free, 60.0 * 60.0 * 18.0);
+  m_octree->setQuadraticParameters(a_coeff, c_coeff, quadratic_start, c_coeff_free);
+  // get expiration time setup
+  m_octree->expireNodes();
 
   double r, g, b, a;
   private_nh.param("color/r", r, 0.0);
@@ -473,7 +499,12 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   // instead of direct scan insertion, compute update to filter ground:
   static SensorUpdateKeyMap update_cells;
   update_cells.clear();
-  update_cells.setFloorTruncation(m_octree->coordToKey(0.0));
+  bool floor_truncation_ = true;
+  double floor_truncation_z_ = 0.0;
+  if (floor_truncation_)
+  {
+    update_cells.setFloorTruncation(m_octree->coordToKey(floor_truncation_z_));
+  }
   // insert ground points only as free:
   for (PCLPointCloud::const_iterator it = ground.begin(); it != ground.end(); ++it){
     point3d point(it->x, it->y, it->z);
@@ -521,8 +552,31 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
           }
         }
 
+        const unsigned int fuzz_cnt = 4;
+        point3d fuzz_point = point;
+        point3d direction = (point - sensorOrigin);
+        // only fuzz in x/y.
+        // This can't work around the edges of the FOV as we won't clear
+        // these! Just fuzz in the correct direction for further.
+//        direction.z() = 0.0;
+        direction.normalize();
+        const double fuzz_amt = 0.5 * 1.414 * m_octree->getResolution();
+        const point3d fuzz_vector = direction * fuzz_amt;
+        for (unsigned int fuzz=0; fuzz<fuzz_cnt; ++fuzz)
+        {
+          // fuzz
+          fuzz_point += fuzz_vector;
+          if (floor_truncation_ && fuzz_point.z() < floor_truncation_z_) {
+            break;
+          }
+          if (m_octree->coordToKeyChecked(fuzz_point, key)){
+            update_cells.insertOccupied(key);
+          }
+        }
+
         updateMinKey(key, m_updateBBXMin);
         updateMaxKey(key, m_updateBBXMax);
+
 
 #ifdef COLOR_OCTOMAP_SERVER // NB: Only read and interpret color if it's an occupied node
         const int rgb = *reinterpret_cast<const int*>(&(it->rgb)); // TODO: there are other ways to encode color than this one
@@ -533,6 +587,8 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
 #endif
       }
 
+      // fuzz
+      point -= (point - sensorOrigin).normalized() * 2 * 1.414 * m_octree->getResolution();
       // free cells
       update_cells.insertFreeRay(sensorOrigin, point,
                                  originKey,
@@ -596,11 +652,22 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   ROS_DEBUG_STREAM("Bounding box keys (after): " << m_updateBBXMin[0] << " " <<m_updateBBXMin[1] << " " << m_updateBBXMin[2] << " / " <<m_updateBBXMax[0] << " "<<m_updateBBXMax[1] << " "<< m_updateBBXMax[2]);
 
   // Prune map if past period
+  bool pruned = false;
+  ros::Time now = ros::Time::now();
   if (m_compressMap) {
-    ros::Time now = ros::Time::now();
     if (now >= m_compressLastTime + ros::Duration(m_compressPeriod)) {
       m_compressLastTime = now;
       m_octree->prune();
+      pruned = true;
+    }
+  }
+
+  // Expire if necessary, skip if we just did a pruning cycle
+  // (We don't want to do both in one update, as they are both expensive)
+  if (!pruned && m_expirePeriod > 0.0) {
+    if (now >= m_expireLastTime + ros::Duration(m_expirePeriod)) {
+      m_expireLastTime = now;
+      m_octree->expireNodes();
     }
   }
 
@@ -618,6 +685,12 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
 void OctomapServer::publishAll(const ros::Time& rostime){
   if (m_publishPeriod > 0.0 && rostime < m_publishLastTime + ros::Duration(m_publishPeriod)) {
     return;
+  }
+  if (m_useTimedMap){
+    // If using a timed map, be sure all expiry's are up to date.
+    // The expiration may not be running in-sync
+    // Do this first, in the odd case that we expire all the nodes
+    m_octree->expireNodes();
   }
   m_publishLastTime = rostime;
   ros::WallTime startTime = ros::WallTime::now();
@@ -707,6 +780,63 @@ void OctomapServer::publishAll(const ros::Time& rostime){
 
             double h = (1.0 - std::min(std::max((cubeCenter.z-minZ)/ (maxZ - minZ), 0.0), 1.0)) *m_colorFactor;
             occupiedNodesVis.markers[idx].colors.push_back(heightMapColor(h));
+          }
+
+          if (m_useTimedMap){
+            time_t expiry = it->getExpiry();
+            time_t max_expiry_delta = m_octree->getMaxExpiryDelta();
+            time_t now = m_octree->getLastUpdateTime();
+            std_msgs::ColorRGBA color;
+            color.a = 1.0;
+            color.r = 0.0;
+            color.g = 0.0;
+            color.b = 0.0;
+            if ( expiry < now ) {
+              // doesn't make sense, so highlight pale yellow.
+              color.r = 1.0;
+              color.g = 1.0;
+              color.b = 0.7;
+            } else {
+              double d;
+              double d_max = static_cast<double>(max_expiry_delta);
+              d = (expiry - now);
+              if(d <= 60.0) {
+                d = sqrt(d) / sqrt(60.0);
+                color.r = 1.0;
+                color.g = d;
+              } else if(d <= 3600.0) {
+                d = sqrt(d-60.0) / sqrt(3600.0-60.0);
+                color.r = 1.0 - d;
+                color.g = 1.0;
+              } else if(d <= 4.0 * 3600.0) {
+                d = sqrt(d-3600.0) / sqrt(3.0 * 3600.0);
+                color.g = 1.0;
+                color.b = d;
+              } else if(d <= 16.0 * 3600.0) {
+                d = sqrt(d-4.0*3600.0) / sqrt(12.0 * 3600.0);
+                color.g = 1.0 - d;
+                color.b = 1.0;
+              } else if(d <= d_max) {
+                double d_max = static_cast<double>(max_expiry_delta);
+                d -= 16.0*3600.0;
+                d_max -= 16.0*3600.0;
+                color.b = 1.0;
+                color.r = d / d_max;
+              } else {
+                // doesn't make sense, highlight lilac
+                color.r = 1.0;
+                color.g = 0.7;
+                color.b = 1.0;
+              }
+
+//              d /= static_cast<double>(max_expiry_delta);
+//              d = sqrt(d);
+//              d *= m_colorFactor;
+            }
+            // use the same color maping as the height map using our
+            // normalized and linearized expiration scale
+//            occupiedNodesVis.markers[idx].colors.push_back(heightMapColor(d));
+            occupiedNodesVis.markers[idx].colors.push_back(color);
           }
 
 #ifdef COLOR_OCTOMAP_SERVER

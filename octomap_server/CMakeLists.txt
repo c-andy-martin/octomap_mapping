@@ -46,6 +46,7 @@ add_library(${PROJECT_NAME}
   src/OctomapServerMultilayer.cpp
   src/TrackingOctomapServer.cpp
   src/SensorUpdateKeyMap.cpp
+  src/OcTreeStampedWithExpiry.cpp
 )
 target_link_libraries(${PROJECT_NAME} ${LINK_LIBS})
 add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_gencfg)

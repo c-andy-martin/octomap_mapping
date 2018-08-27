@@ -356,6 +356,8 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr
 void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCloud& ground, const PCLPointCloud& nonground){
   point3d sensorOrigin = pointTfToOctomap(sensorOriginTf);
 
+  bool discrete = true;
+
   if (!m_octree->coordToKeyChecked(sensorOrigin, m_updateBBXMin)
     || !m_octree->coordToKeyChecked(sensorOrigin, m_updateBBXMax))
   {
@@ -376,17 +378,24 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
       point = sensorOrigin + (point - sensorOrigin).normalized() * m_maxRange;
     }
 
-    // only clear space (ground points)
-    if (m_octree->computeRayKeys(sensorOrigin, point, m_keyRay)){
-      free_cells.insert(m_keyRay.begin(), m_keyRay.end());
-    }
-
+    // free endpoint
     octomap::OcTreeKey endKey;
     if (m_octree->coordToKeyChecked(point, endKey)){
+      if (!free_cells.insert(endKey).second) {
+        if (discrete) {
+          // This ray has already been traced
+          continue;
+        }
+      }
       updateMinKey(endKey, m_updateBBXMin);
       updateMaxKey(endKey, m_updateBBXMax);
     } else{
       ROS_ERROR_STREAM("Could not generate Key for endpoint "<<point);
+    }
+
+    // only clear space (ground points)
+    if (m_octree->computeRayKeys(sensorOrigin, point, m_keyRay)){
+      free_cells.insert(m_keyRay.begin(), m_keyRay.end());
     }
   }
 
@@ -396,14 +405,15 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
     // maxrange check
     if ((m_maxRange < 0.0) || ((point - sensorOrigin).norm() <= m_maxRange) ) {
 
-      // free cells
-      if (m_octree->computeRayKeys(sensorOrigin, point, m_keyRay)){
-        free_cells.insert(m_keyRay.begin(), m_keyRay.end());
-      }
       // occupied endpoint
       OcTreeKey key;
       if (m_octree->coordToKeyChecked(point, key)){
-        occupied_cells.insert(key);
+        if (!occupied_cells.insert(key).second) {
+          if (discrete) {
+            // This ray has already been traced
+            continue;
+          }
+        }
 
         updateMinKey(key, m_updateBBXMin);
         updateMaxKey(key, m_updateBBXMax);
@@ -416,21 +426,32 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
         m_octree->averageNodeColor(it->x, it->y, it->z, colors[0], colors[1], colors[2]);
 #endif
       }
+
+      // free cells
+      if (m_octree->computeRayKeys(sensorOrigin, point, m_keyRay)){
+        free_cells.insert(m_keyRay.begin(), m_keyRay.end());
+      }
     } else {// ray longer than maxrange:;
       point3d new_end = sensorOrigin + (point - sensorOrigin).normalized() * m_maxRange;
+
+      // free endpoint
+      octomap::OcTreeKey endKey;
+      if (m_octree->coordToKeyChecked(new_end, endKey)){
+        if (!free_cells.insert(endKey).second) {
+          if (discrete) {
+            // This ray has already been traced
+            continue;
+          }
+        }
+        updateMinKey(endKey, m_updateBBXMin);
+        updateMaxKey(endKey, m_updateBBXMax);
+      } else{
+        ROS_ERROR_STREAM("Could not generate Key for endpoint "<<new_end);
+      }
+
+      // free cells
       if (m_octree->computeRayKeys(sensorOrigin, new_end, m_keyRay)){
         free_cells.insert(m_keyRay.begin(), m_keyRay.end());
-
-        octomap::OcTreeKey endKey;
-        if (m_octree->coordToKeyChecked(new_end, endKey)){
-          free_cells.insert(endKey);
-          updateMinKey(endKey, m_updateBBXMin);
-          updateMaxKey(endKey, m_updateBBXMax);
-        } else{
-          ROS_ERROR_STREAM("Could not generate Key for endpoint "<<new_end);
-        }
-
-
       }
     }
   }

@@ -99,6 +99,29 @@ public:
   virtual bool openFile(const std::string& filename);
 
 protected:
+  // Add an input point cloud topic
+  inline void addCloudTopic(const std::string &topic) {
+    boost::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2> > pointCloudSub(
+      new message_filters::Subscriber<sensor_msgs::PointCloud2> (
+        m_nh,
+        topic,
+        5
+      )
+    );
+    boost::shared_ptr<tf::MessageFilter<sensor_msgs::PointCloud2> > tfPointCloudSub(
+      new tf::MessageFilter<sensor_msgs::PointCloud2> (
+        *pointCloudSub,
+        m_tfListener,
+        m_worldFrameId,
+        5
+      )
+    );
+    tfPointCloudSub->registerCallback(boost::bind(&OctomapServer::insertCloudCallback, this, _1));
+    m_pointCloudSubs.push_back(pointCloudSub);
+    m_tfPointCloudSubs.push_back(tfPointCloudSub);
+  }
+
+
   inline static void updateMinKey(const octomap::OcTreeKey& in, octomap::OcTreeKey& min) {
     for (unsigned i = 0; i < 3; ++i)
       min[i] = std::min(in[i], min[i]);
@@ -200,8 +223,8 @@ protected:
   static std_msgs::ColorRGBA heightMapColor(double h);
   ros::NodeHandle m_nh;
   ros::Publisher  m_markerPub, m_binaryMapPub, m_fullMapPub, m_pointCloudPub, m_collisionObjectPub, m_mapPub, m_cmapPub, m_fmapPub, m_fmarkerPub;
-  message_filters::Subscriber<sensor_msgs::PointCloud2>* m_pointCloudSub;
-  tf::MessageFilter<sensor_msgs::PointCloud2>* m_tfPointCloudSub;
+  std::vector<boost::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2> > > m_pointCloudSubs;
+  std::vector<boost::shared_ptr<tf::MessageFilter<sensor_msgs::PointCloud2> > > m_tfPointCloudSubs;
   ros::ServiceServer m_octomapBinaryService, m_octomapFullService, m_clearBBXService, m_resetService;
   tf::TransformListener m_tfListener;
   boost::recursive_mutex m_config_mutex;

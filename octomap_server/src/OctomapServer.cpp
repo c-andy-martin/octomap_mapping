@@ -41,8 +41,6 @@ namespace octomap_server{
 
 OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
 : m_nh(),
-  m_pointCloudSub(NULL),
-  m_tfPointCloudSub(NULL),
   m_reconfigureServer(m_config_mutex),
   m_octree(NULL),
   m_maxRange(-1.0),
@@ -89,6 +87,9 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   private_nh.param("occupancy_max_z", m_occupancyMaxZ,m_occupancyMaxZ);
   private_nh.param("min_x_size", m_minSizeX,m_minSizeX);
   private_nh.param("min_y_size", m_minSizeY,m_minSizeY);
+
+  std::vector<std::string> cloud_topics;
+  private_nh.getParam("cloud_topics", cloud_topics);
 
   private_nh.param("filter_speckles", m_filterSpeckles, m_filterSpeckles);
   private_nh.param("filter_ground", m_filterGroundPlane, m_filterGroundPlane);
@@ -173,9 +174,12 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   m_mapPub = m_nh.advertise<nav_msgs::OccupancyGrid>("projected_map", 5, m_latchedTopics);
   m_fmarkerPub = m_nh.advertise<visualization_msgs::MarkerArray>("free_cells_vis_array", 1, m_latchedTopics);
 
-  m_pointCloudSub = new message_filters::Subscriber<sensor_msgs::PointCloud2> (m_nh, "cloud_in", 5);
-  m_tfPointCloudSub = new tf::MessageFilter<sensor_msgs::PointCloud2> (*m_pointCloudSub, m_tfListener, m_worldFrameId, 5);
-  m_tfPointCloudSub->registerCallback(boost::bind(&OctomapServer::insertCloudCallback, this, _1));
+  if (cloud_topics.size() <= 0) {
+    cloud_topics.push_back("cloud_in");
+  }
+  for (unsigned i=0; i < cloud_topics.size(); i++) {
+    addCloudTopic(cloud_topics[i]);
+  }
 
   m_octomapBinaryService = m_nh.advertiseService("octomap_binary", &OctomapServer::octomapBinarySrv, this);
   m_octomapFullService = m_nh.advertiseService("octomap_full", &OctomapServer::octomapFullSrv, this);
@@ -188,16 +192,9 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
 }
 
 OctomapServer::~OctomapServer(){
-  if (m_tfPointCloudSub){
-    delete m_tfPointCloudSub;
-    m_tfPointCloudSub = NULL;
-  }
-
-  if (m_pointCloudSub){
-    delete m_pointCloudSub;
-    m_pointCloudSub = NULL;
-  }
-
+  // Because the TF message filter references the subscriber, deleted them first
+  m_tfPointCloudSubs.clear();
+  m_pointCloudSubs.clear();
 
   if (m_octree){
     delete m_octree;

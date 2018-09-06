@@ -66,6 +66,8 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_filterSpeckles(false), m_filterGroundPlane(false),
   m_groundFilterDistance(0.04), m_groundFilterAngle(0.15), m_groundFilterPlaneDistance(0.07),
   m_compressMap(true),
+  m_compressPeriod(0.0),
+  m_compressLastTime(ros::Time::now()),
   m_incrementalUpdate(false),
   m_initConfig(true)
 {
@@ -111,6 +113,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_nh_private.param("sensor_model/min", thresMin, 0.12);
   m_nh_private.param("sensor_model/max", thresMax, 0.97);
   m_nh_private.param("compress_map", m_compressMap, m_compressMap);
+  m_nh_private.param("compress_period", m_compressPeriod, m_compressPeriod);
   m_nh_private.param("incremental_2D_projection", m_incrementalUpdate, m_incrementalUpdate);
 
   if (m_filterGroundPlane && (m_pointcloudMinZ > 0.0 || m_pointcloudMaxZ < 0.0)){
@@ -580,8 +583,14 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   ROS_DEBUG_STREAM("Updated area bounding box: "<< minPt << " - "<<maxPt);
   ROS_DEBUG_STREAM("Bounding box keys (after): " << m_updateBBXMin[0] << " " <<m_updateBBXMin[1] << " " << m_updateBBXMin[2] << " / " <<m_updateBBXMax[0] << " "<<m_updateBBXMax[1] << " "<< m_updateBBXMax[2]);
 
-  if (m_compressMap)
-    m_octree->prune();
+  // Prune map if past period
+  if (m_compressMap) {
+    ros::Time now = ros::Time::now();
+    if (now >= m_compressLastTime + ros::Duration(m_compressPeriod)) {
+      m_compressLastTime = now;
+      m_octree->prune();
+    }
+  }
 
 #ifdef COLOR_OCTOMAP_SERVER
   if (colors)

@@ -50,6 +50,8 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   m_colorFactor(0.8),
   m_latchedTopics(true),
   m_publishFreeSpace(false),
+  m_publishPeriod(0.0),
+  m_publishLastTime(ros::Time::now()),
   m_res(0.05),
   m_treeDepth(0),
   m_maxTreeDepth(0),
@@ -166,6 +168,7 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   m_colorFree.a = a;
 
   private_nh.param("publish_free_space", m_publishFreeSpace, m_publishFreeSpace);
+  private_nh.param("publish_period", m_publishPeriod, m_publishPeriod);
 
   private_nh.param("latch", m_latchedTopics, m_latchedTopics);
   if (m_latchedTopics){
@@ -609,6 +612,10 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
 
 
 void OctomapServer::publishAll(const ros::Time& rostime){
+  if (m_publishPeriod > 0.0 && rostime < m_publishLastTime + ros::Duration(m_publishPeriod)) {
+    return;
+  }
+  m_publishLastTime = rostime;
   ros::WallTime startTime = ros::WallTime::now();
   size_t octomapSize = m_octree->size();
   // TODO: estimate num occ. voxels for size of arrays (reserve)

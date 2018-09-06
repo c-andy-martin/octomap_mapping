@@ -298,6 +298,8 @@ protected:
 
   bool m_latchedTopics;
   bool m_publishFreeSpace;
+  double m_publishPeriod;
+  ros::Time m_publishLastTime;
 
   double m_res;
   unsigned m_treeDepth;

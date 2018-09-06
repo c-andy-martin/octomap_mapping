@@ -91,6 +91,9 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   std::vector<std::string> cloud_topics;
   private_nh.getParam("cloud_topics", cloud_topics);
 
+  XmlRpc::XmlRpcValue segmented_topics;
+  private_nh.getParam("segmented_topics", segmented_topics);
+
   private_nh.param("filter_speckles", m_filterSpeckles, m_filterSpeckles);
   private_nh.param("filter_ground", m_filterGroundPlane, m_filterGroundPlane);
   // distance of points from plane for RANSAC
@@ -174,11 +177,42 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   m_mapPub = m_nh.advertise<nav_msgs::OccupancyGrid>("projected_map", 5, m_latchedTopics);
   m_fmarkerPub = m_nh.advertise<visualization_msgs::MarkerArray>("free_cells_vis_array", 1, m_latchedTopics);
 
-  if (cloud_topics.size() <= 0) {
-    cloud_topics.push_back("cloud_in");
+  // Already segmented topics
+  if (segmented_topics.getType() == XmlRpc::XmlRpcValue::TypeArray) {
+    for (int32_t i = 0; i < segmented_topics.size(); ++i) {
+      std::string ground_topic = "";
+      std::string nonground_topic = "";
+      XmlRpc::XmlRpcValue& segmented_topic(segmented_topics[i]);
+      if (segmented_topic.getType() == XmlRpc::XmlRpcValue::TypeStruct) {
+        std::string member;
+        member = "ground_topic";
+        if (segmented_topic.hasMember(member)) {
+          XmlRpc::XmlRpcValue& v(segmented_topic[member]);
+          if (v.getType() == XmlRpc::XmlRpcValue::TypeString) {
+            ground_topic = static_cast<std::string>(v);
+          }
+        }
+        member = "nonground_topic";
+        if (segmented_topic.hasMember(member)) {
+          XmlRpc::XmlRpcValue& v(segmented_topic[member]);
+          if (v.getType() == XmlRpc::XmlRpcValue::TypeString) {
+            nonground_topic = static_cast<std::string>(v);
+          }
+        }
+      }
+      if (!ground_topic.empty() && !nonground_topic.empty()) {
+        addSegmentedCloudTopic(ground_topic, nonground_topic);
+      }
+    }
   }
+
   for (unsigned i=0; i < cloud_topics.size(); i++) {
     addCloudTopic(cloud_topics[i]);
+  }
+
+  // If we have not subscribed to any topics, subscribe to default "cloud_in"
+  if (m_pointCloudSubs.empty()) {
+    addCloudTopic("cloud_in");
   }
 
   m_octomapBinaryService = m_nh.advertiseService("octomap_binary", &OctomapServer::octomapBinarySrv, this);
@@ -192,7 +226,9 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
 }
 
 OctomapServer::~OctomapServer(){
-  // Because the TF message filter references the subscriber, deleted them first
+  // Because time synchronizers reference TF filters, delete them first
+  m_timeSynchronizers.clear();
+  // Because TF message filters reference the subscriber, deleted them next
   m_tfPointCloudSubs.clear();
   m_pointCloudSubs.clear();
 
@@ -348,6 +384,66 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr
   ROS_DEBUG("Pointcloud insertion in OctomapServer done (%zu+%zu pts (ground/nonground), %f sec)", pc_ground.size(), pc_nonground.size(), total_elapsed);
 
   publishAll(cloud->header.stamp);
+}
+
+void OctomapServer::insertSegmentedCloudCallback(
+    const sensor_msgs::PointCloud2::ConstPtr& ground_cloud,
+    const sensor_msgs::PointCloud2::ConstPtr& nonground_cloud)
+{
+  ros::WallTime startTime = ros::WallTime::now();
+
+  PCLPointCloud pc_ground;
+  PCLPointCloud pc_nonground;
+  pcl::fromROSMsg(*ground_cloud, pc_ground);
+  pcl::fromROSMsg(*nonground_cloud, pc_nonground);
+
+  tf::StampedTransform sensorToWorldTf;
+  // Assume exact time-synchronization, only lookup one TF
+  try {
+    m_tfListener.lookupTransform(m_worldFrameId, nonground_cloud->header.frame_id, nonground_cloud->header.stamp, sensorToWorldTf);
+  } catch(tf::TransformException& ex){
+    ROS_ERROR_STREAM( "Transform error of sensor data: " << ex.what() << ", quitting callback");
+    return;
+  }
+
+  Eigen::Matrix4f sensorToWorld;
+  pcl_ros::transformAsMatrix(sensorToWorldTf, sensorToWorld);
+
+  // set up filter for height range, also removes NANs:
+  pcl::PassThrough<PCLPoint> pass_x;
+  pass_x.setFilterFieldName("x");
+  pass_x.setFilterLimits(m_pointcloudMinX, m_pointcloudMaxX);
+  pcl::PassThrough<PCLPoint> pass_y;
+  pass_y.setFilterFieldName("y");
+  pass_y.setFilterLimits(m_pointcloudMinY, m_pointcloudMaxY);
+  pcl::PassThrough<PCLPoint> pass_z;
+  pass_z.setFilterFieldName("z");
+  pass_z.setFilterLimits(m_pointcloudMinZ, m_pointcloudMaxZ);
+
+  // directly transform to map frame:
+  pcl::transformPointCloud(pc_ground, pc_ground, sensorToWorld);
+  pcl::transformPointCloud(pc_nonground, pc_nonground, sensorToWorld);
+
+  pass_x.setInputCloud(pc_ground.makeShared());
+  pass_x.filter(pc_ground);
+  pass_y.setInputCloud(pc_ground.makeShared());
+  pass_y.filter(pc_ground);
+  pass_z.setInputCloud(pc_ground.makeShared());
+  pass_z.filter(pc_ground);
+
+  pass_x.setInputCloud(pc_nonground.makeShared());
+  pass_x.filter(pc_nonground);
+  pass_y.setInputCloud(pc_nonground.makeShared());
+  pass_y.filter(pc_nonground);
+  pass_z.setInputCloud(pc_nonground.makeShared());
+  pass_z.filter(pc_nonground);
+
+  insertScan(sensorToWorldTf.getOrigin(), pc_ground, pc_nonground);
+
+  double total_elapsed = (ros::WallTime::now() - startTime).toSec();
+  ROS_DEBUG("Pointcloud insertion in OctomapServer done (%zu+%zu pts (ground/nonground), %f sec)", pc_ground.size(), pc_nonground.size(), total_elapsed);
+
+  publishAll(nonground_cloud->header.stamp);
 }
 
 void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCloud& ground, const PCLPointCloud& nonground){

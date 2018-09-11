@@ -28,6 +28,7 @@
  */
 
 #include <octomap_server/OctomapServer.h>
+#include <octomap_server/SensorUpdateKeyMap.h>
 
 using namespace octomap;
 using octomap_msgs::Octomap;
@@ -453,6 +454,8 @@ void OctomapServer::insertSegmentedCloudCallback(
 
 void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCloud& ground, const PCLPointCloud& nonground){
   point3d sensorOrigin = pointTfToOctomap(sensorOriginTf);
+  OcTreeKey originKey = m_octree->coordToKey(sensorOrigin);
+  point3d originBoundary = m_octree->keyToCoord(originKey);
 
   bool discrete = true;
 
@@ -467,7 +470,9 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
 #endif
 
   // instead of direct scan insertion, compute update to filter ground:
-  KeySet free_cells, occupied_cells;
+  static SensorUpdateKeyMap update_cells;
+  update_cells.clear();
+  update_cells.setFloorTruncation(m_octree->coordToKey(0.0));
   // insert ground points only as free:
   for (PCLPointCloud::const_iterator it = ground.begin(); it != ground.end(); ++it){
     point3d point(it->x, it->y, it->z);
@@ -479,7 +484,7 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
     // free endpoint
     octomap::OcTreeKey endKey;
     if (m_octree->coordToKeyChecked(point, endKey)){
-      if (!free_cells.insert(endKey).second) {
+      if (!update_cells.insertFree(endKey)) {
         if (discrete) {
           // This ray has already been traced
           continue;
@@ -492,9 +497,11 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
     }
 
     // only clear space (ground points)
-    if (m_octree->computeRayKeys(sensorOrigin, point, m_keyRay)){
-      free_cells.insert(m_keyRay.begin(), m_keyRay.end());
-    }
+    update_cells.insertFreeRay(sensorOrigin, point,
+                               originKey,
+                               m_octree->coordToKey(point),
+                               originBoundary,
+                               m_octree->getResolution());
   }
 
   // all other points: free on ray, occupied on endpoint:
@@ -506,7 +513,7 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
       // occupied endpoint
       OcTreeKey key;
       if (m_octree->coordToKeyChecked(point, key)){
-        if (!occupied_cells.insert(key).second) {
+        if (!update_cells.insertOccupied(key)) {
           if (discrete) {
             // This ray has already been traced
             continue;
@@ -522,16 +529,18 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
       }
 
       // free cells
-      if (m_octree->computeRayKeys(sensorOrigin, point, m_keyRay)){
-        free_cells.insert(m_keyRay.begin(), m_keyRay.end());
-      }
+      update_cells.insertFreeRay(sensorOrigin, point,
+                                 originKey,
+                                 m_octree->coordToKey(point),
+                                 originBoundary,
+                                 m_octree->getResolution());
     } else {// ray longer than maxrange:;
       point3d new_end = sensorOrigin + (point - sensorOrigin).normalized() * m_maxRange;
 
       // free endpoint
       octomap::OcTreeKey endKey;
       if (m_octree->coordToKeyChecked(new_end, endKey)){
-        if (!free_cells.insert(endKey).second) {
+        if (!update_cells.insertFree(endKey)) {
           if (discrete) {
             // This ray has already been traced
             continue;
@@ -544,22 +553,17 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
       }
 
       // free cells
-      if (m_octree->computeRayKeys(sensorOrigin, new_end, m_keyRay)){
-        free_cells.insert(m_keyRay.begin(), m_keyRay.end());
-      }
+      update_cells.insertFreeRay(sensorOrigin, new_end,
+                                 originKey,
+                                 m_octree->coordToKey(new_end),
+                                 originBoundary,
+                                 m_octree->getResolution());
     }
   }
 
-  // mark free cells only if not seen occupied in this cloud
-  for(KeySet::iterator it = free_cells.begin(), end=free_cells.end(); it!= end; ++it){
-    if (occupied_cells.find(*it) == occupied_cells.end()){
-      m_octree->updateNode(*it, false);
-    }
-  }
-
-  // now mark all occupied cells:
-  for (KeySet::iterator it = occupied_cells.begin(), end=occupied_cells.end(); it!= end; it++) {
-    m_octree->updateNode(*it, true);
+  // now update all cells per the accumulated update
+  for (SensorUpdateKeyMap::iterator it = update_cells.begin(), end=update_cells.end(); it!= end; it++) {
+    m_octree->updateNode(it->key, it->value);
   }
 
   // TODO: eval lazy+updateInner vs. proper insertion

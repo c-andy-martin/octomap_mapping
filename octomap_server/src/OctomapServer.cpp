@@ -53,7 +53,9 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   m_latchedTopics(true),
   m_publishFreeSpace(false),
   m_publishPeriod(0.0),
+  m_publish2DPeriod(0.0),
   m_publishLastTime(ros::Time::now()),
+  m_publish2DLastTime(ros::Time::now()),
   m_res(0.05),
   m_treeDepth(0),
   m_maxTreeDepth(0),
@@ -196,6 +198,7 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
 
   private_nh.param("publish_free_space", m_publishFreeSpace, m_publishFreeSpace);
   private_nh.param("publish_period", m_publishPeriod, m_publishPeriod);
+  private_nh.param("publish_2d_period", m_publish2DPeriod, m_publish2DPeriod);
 
   private_nh.param("latch", m_latchedTopics, m_latchedTopics);
   if (m_latchedTopics){
@@ -683,16 +686,43 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
 
 
 void OctomapServer::publishAll(const ros::Time& rostime){
+
+  // Figure out which category to publish based on rate (if enabled)
+  bool publish_all = true;
+  bool publish_3d = true;
+  bool publish_2d = true;
   if (m_publishPeriod > 0.0 && rostime < m_publishLastTime + ros::Duration(m_publishPeriod)) {
+    publish_all = false;
+  }
+  if (m_publish2DPeriod > 0.0 && rostime < m_publish2DLastTime + ros::Duration(m_publish2DPeriod)) {
+    publish_2d = false;
+  }
+  // Publishing 3D topics follows publishing all
+  publish_3d = publish_all;
+  if (publish_all)
+  {
+    publish_2d = true;
+  }
+  if (!publish_2d && !publish_3d)
+  {
+    // there is nothing to do.
     return;
   }
-  if (m_useTimedMap){
+
+  if (m_useTimedMap && publish_all){
     // If using a timed map, be sure all expiry's are up to date.
     // The expiration may not be running in-sync
     // Do this first, in the odd case that we expire all the nodes
     m_octree->expireNodes();
   }
-  m_publishLastTime = rostime;
+
+  if (publish_all) {
+    m_publishLastTime = rostime;
+  }
+  if (publish_2d) {
+    m_publish2DLastTime = rostime;
+  }
+
   ros::WallTime startTime = ros::WallTime::now();
   size_t octomapSize = m_octree->size();
   // TODO: estimate num occ. voxels for size of arrays (reserve)
@@ -707,6 +737,20 @@ void OctomapServer::publishAll(const ros::Time& rostime){
   bool publishBinaryMap = (m_latchedTopics || m_binaryMapPub.getNumSubscribers() > 0);
   bool publishFullMap = (m_latchedTopics || m_fullMapPub.getNumSubscribers() > 0);
   m_publish2DMap = (m_latchedTopics || m_mapPub.getNumSubscribers() > 0);
+
+  // Update above based on publish period booleans set above.
+  if (!publish_3d)
+  {
+    publishFreeMarkerArray = false;
+    publishMarkerArray = false;
+    publishPointCloud = false;
+    publishBinaryMap = false;
+    publishFullMap = false;
+  }
+  if (!publish_2d)
+  {
+    m_publish2DMap = false;
+  }
 
   // init markers for free space:
   visualization_msgs::MarkerArray freeNodesVis;

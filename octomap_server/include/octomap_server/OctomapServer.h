@@ -303,6 +303,8 @@ protected:
   bool m_publishFreeSpace;
   double m_publishPeriod;
   ros::Time m_publishLastTime;
+  double m_publish2DPeriod;
+  ros::Time m_publish2DLastTime;
 
   double m_res;
   unsigned m_treeDepth;

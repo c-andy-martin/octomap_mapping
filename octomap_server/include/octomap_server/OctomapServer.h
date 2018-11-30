@@ -100,7 +100,8 @@ public:
 
   virtual void insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud);
   virtual void insertSegmentedCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& ground_cloud,
-                                            const sensor_msgs::PointCloud2::ConstPtr& nonground_cloud);
+                                            const sensor_msgs::PointCloud2::ConstPtr& nonground_cloud,
+                                            const sensor_msgs::PointCloud2::ConstPtr& nonclearing_nonground_cloud);
   virtual bool openFile(const std::string& filename);
 
 protected:
@@ -127,7 +128,7 @@ protected:
   }
 
   // Add an input pre-segmented point cloud topic
-  inline void addSegmentedCloudTopic(const std::string &ground_topic, const std::string &nonground_topic) {
+  inline void addSegmentedCloudTopic(const std::string &ground_topic, const std::string &nonground_topic, const std::string &nonclearing_nonground_topic) {
     boost::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2> > groundPointCloudSub(
       new message_filters::Subscriber<sensor_msgs::PointCloud2> (
         m_nh,
@@ -158,21 +159,56 @@ protected:
         5
       )
     );
-    boost::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::PointCloud2, sensor_msgs::PointCloud2> > sync
-    (
-      new message_filters::TimeSynchronizer<sensor_msgs::PointCloud2, sensor_msgs::PointCloud2>
-      (
-        *tfGroundPointCloudSub,
-        *tfNongroundPointCloudSub,
-        5
-      )
-    );
-    sync->registerCallback(boost::bind(&OctomapServer::insertSegmentedCloudCallback, this, _1, _2));
+    if (0 == nonclearing_nonground_topic.size())
+    {
+      boost::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::PointCloud2, sensor_msgs::PointCloud2> > m_sync2(
+        new message_filters::TimeSynchronizer<sensor_msgs::PointCloud2, sensor_msgs::PointCloud2>
+        (
+          *tfGroundPointCloudSub,
+          *tfNongroundPointCloudSub,
+          5
+        )
+      );
+      m_sync2->registerCallback(boost::bind(&OctomapServer::insertSegmentedCloudCallback, this, _1, _2,
+                                            sensor_msgs::PointCloud2::ConstPtr()));
+      m_sync2s.push_back(m_sync2);
+    }
+    else
+    {
+      boost::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2> > nonclearingNongroundPointCloudSub(
+        new message_filters::Subscriber<sensor_msgs::PointCloud2> (
+          m_nh,
+          nonclearing_nonground_topic,
+          5
+        )
+      );
+      boost::shared_ptr<tf::MessageFilter<sensor_msgs::PointCloud2> > tfNonclearingNongroundPointCloudSub(
+        new tf::MessageFilter<sensor_msgs::PointCloud2> (
+          *nonclearingNongroundPointCloudSub,
+          m_tfListener,
+          m_worldFrameId,
+          5
+        )
+      );
+      boost::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::PointCloud2, sensor_msgs::PointCloud2, sensor_msgs::PointCloud2> > m_sync3(
+        new message_filters::TimeSynchronizer<sensor_msgs::PointCloud2, sensor_msgs::PointCloud2, sensor_msgs::PointCloud2>
+        (
+          *tfGroundPointCloudSub,
+          *tfNongroundPointCloudSub,
+          *tfNonclearingNongroundPointCloudSub,
+          5
+        )
+      );
+      m_sync3->registerCallback(boost::bind(&OctomapServer::insertSegmentedCloudCallback, this, _1, _2, _3));
+      m_sync3s.push_back(m_sync3);
+
+      m_pointCloudSubs.push_back(nonclearingNongroundPointCloudSub);
+      m_tfPointCloudSubs.push_back(tfNonclearingNongroundPointCloudSub);
+    }
     m_pointCloudSubs.push_back(groundPointCloudSub);
     m_pointCloudSubs.push_back(nongroundPointCloudSub);
     m_tfPointCloudSubs.push_back(tfGroundPointCloudSub);
     m_tfPointCloudSubs.push_back(tfNongroundPointCloudSub);
-    m_timeSynchronizers.push_back(sync);
   }
 
 
@@ -208,9 +244,11 @@ protected:
   *
   * @param sensorOrigin origin of the measurements for raycasting
   * @param ground scan endpoints on the ground plane (only clear space)
-  * @param nonground all other endpoints (clear up to occupied endpoint)
+  * @param nonground endpoints (clear up to occupied endpoint)
+  * @param nonclearing, nonground endpoints (do not clear up to occupied endpoint)
   */
-  virtual void insertScan(const tf::Point& sensorOrigin, const PCLPointCloud& ground, const PCLPointCloud& nonground);
+  virtual void insertScan(const tf::Point& sensorOrigin, const PCLPointCloud& ground, const PCLPointCloud& nonground,
+                          const PCLPointCloud& nonclearing_nonground = PCLPointCloud());
 
   /// label the input cloud "pc" into ground and nonground. Should be in the robot's fixed frame (not world!)
   void filterGroundPlane(const PCLPointCloud& pc, PCLPointCloud& ground, PCLPointCloud& nonground) const;
@@ -279,7 +317,8 @@ protected:
   ros::Publisher  m_markerPub, m_binaryMapPub, m_fullMapPub, m_pointCloudPub, m_collisionObjectPub, m_mapPub, m_cmapPub, m_fmapPub, m_fmarkerPub;
   std::vector<boost::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2> > > m_pointCloudSubs;
   std::vector<boost::shared_ptr<tf::MessageFilter<sensor_msgs::PointCloud2> > > m_tfPointCloudSubs;
-  std::vector<boost::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::PointCloud2, sensor_msgs::PointCloud2> > > m_timeSynchronizers;
+  std::vector<boost::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::PointCloud2, sensor_msgs::PointCloud2> > > m_sync2s;
+  std::vector<boost::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::PointCloud2, sensor_msgs::PointCloud2, sensor_msgs::PointCloud2> > > m_sync3s;
   ros::ServiceServer m_octomapBinaryService, m_octomapFullService, m_clearBBXService, m_resetService;
   tf::TransformListener m_tfListener;
   boost::recursive_mutex m_config_mutex;

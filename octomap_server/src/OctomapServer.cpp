@@ -217,6 +217,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
     for (int32_t i = 0; i < segmented_topics.size(); ++i) {
       std::string ground_topic = "";
       std::string nonground_topic = "";
+      std::string nonclearing_nonground_topic = "";
       XmlRpc::XmlRpcValue& segmented_topic(segmented_topics[i]);
       if (segmented_topic.getType() == XmlRpc::XmlRpcValue::TypeStruct) {
         std::string member;
@@ -234,9 +235,16 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
             nonground_topic = static_cast<std::string>(v);
           }
         }
+        member = "nonclearing_nonground_topic";
+        if (segmented_topic.hasMember(member)) {
+          XmlRpc::XmlRpcValue& v(segmented_topic[member]);
+          if (v.getType() == XmlRpc::XmlRpcValue::TypeString) {
+            nonclearing_nonground_topic = static_cast<std::string>(v);
+          }
+        }
       }
       if (!ground_topic.empty() && !nonground_topic.empty()) {
-        addSegmentedCloudTopic(ground_topic, nonground_topic);
+        addSegmentedCloudTopic(ground_topic, nonground_topic, nonclearing_nonground_topic);
       }
     }
   }
@@ -262,7 +270,8 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
 
 OctomapServer::~OctomapServer(){
   // Because time synchronizers reference TF filters, delete them first
-  m_timeSynchronizers.clear();
+  m_sync2s.clear();
+  m_sync3s.clear();
   // Because TF message filters reference the subscriber, deleted them next
   m_tfPointCloudSubs.clear();
   m_pointCloudSubs.clear();
@@ -423,14 +432,20 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr
 
 void OctomapServer::insertSegmentedCloudCallback(
     const sensor_msgs::PointCloud2::ConstPtr& ground_cloud,
-    const sensor_msgs::PointCloud2::ConstPtr& nonground_cloud)
+    const sensor_msgs::PointCloud2::ConstPtr& nonground_cloud,
+    const sensor_msgs::PointCloud2::ConstPtr& nonclearing_nonground_cloud)
 {
   ros::WallTime startTime = ros::WallTime::now();
 
   PCLPointCloud pc_ground;
   PCLPointCloud pc_nonground;
+  PCLPointCloud pc_nonclearing_nonground;
   pcl::fromROSMsg(*ground_cloud, pc_ground);
   pcl::fromROSMsg(*nonground_cloud, pc_nonground);
+  if (nonclearing_nonground_cloud)
+  {
+    pcl::fromROSMsg(*nonclearing_nonground_cloud, pc_nonclearing_nonground);
+  }
 
   tf::StampedTransform sensorToWorldTf;
   // Assume exact time-synchronization, only lookup one TF
@@ -458,6 +473,7 @@ void OctomapServer::insertSegmentedCloudCallback(
   // directly transform to map frame:
   pcl::transformPointCloud(pc_ground, pc_ground, sensorToWorld);
   pcl::transformPointCloud(pc_nonground, pc_nonground, sensorToWorld);
+  pcl::transformPointCloud(pc_nonclearing_nonground, pc_nonclearing_nonground, sensorToWorld);
 
   pass_x.setInputCloud(pc_ground.makeShared());
   pass_x.filter(pc_ground);
@@ -473,7 +489,14 @@ void OctomapServer::insertSegmentedCloudCallback(
   pass_z.setInputCloud(pc_nonground.makeShared());
   pass_z.filter(pc_nonground);
 
-  insertScan(sensorToWorldTf.getOrigin(), pc_ground, pc_nonground);
+  pass_x.setInputCloud(pc_nonclearing_nonground.makeShared());
+  pass_x.filter(pc_nonclearing_nonground);
+  pass_y.setInputCloud(pc_nonclearing_nonground.makeShared());
+  pass_y.filter(pc_nonclearing_nonground);
+  pass_z.setInputCloud(pc_nonclearing_nonground.makeShared());
+  pass_z.filter(pc_nonclearing_nonground);
+
+  insertScan(sensorToWorldTf.getOrigin(), pc_ground, pc_nonground, pc_nonclearing_nonground);
 
   double total_elapsed = (ros::WallTime::now() - startTime).toSec();
   ROS_DEBUG("Pointcloud insertion in OctomapServer done (%zu+%zu pts (ground/nonground), %f sec)", pc_ground.size(), pc_nonground.size(), total_elapsed);
@@ -481,7 +504,9 @@ void OctomapServer::insertSegmentedCloudCallback(
   publishAll(nonground_cloud->header.stamp);
 }
 
-void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCloud& ground, const PCLPointCloud& nonground){
+void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCloud& ground,
+                          const PCLPointCloud& nonground, const PCLPointCloud& nonclearing_nonground)
+{
   point3d sensorOrigin = pointTfToOctomap(sensorOriginTf);
   OcTreeKey originKey = m_octree->coordToKey(sensorOrigin);
   point3d originBoundary = m_octree->keyToCoord(originKey);
@@ -538,7 +563,7 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
                                m_octree->getResolution());
   }
 
-  // all other points: free on ray, occupied on endpoint:
+  // insert non-ground points: free on ray, occupied on endpoint:
   for (PCLPointCloud::const_iterator it = nonground.begin(); it != nonground.end(); ++it){
     point3d point(it->x, it->y, it->z);
     // maxrange check
@@ -620,6 +645,30 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
     }
   }
 
+  // insert non-clearing, non-ground points: occupied only on endpoint:
+  for (PCLPointCloud::const_iterator it = nonclearing_nonground.begin(); it != nonclearing_nonground.end(); ++it){
+    point3d point(it->x, it->y, it->z);
+    // maxrange check
+    if ((m_maxRange < 0.0) || ((point - sensorOrigin).norm() <= m_maxRange) ) {
+
+      // occupied endpoint
+      OcTreeKey key;
+      if (m_octree->coordToKeyChecked(point, key)){
+        update_cells.insertOccupied(key);
+
+        updateMinKey(key, m_updateBBXMin);
+        updateMaxKey(key, m_updateBBXMax);
+
+#ifdef COLOR_OCTOMAP_SERVER // NB: Only read and interpret color if it's an occupied node
+        const int rgb = *reinterpret_cast<const int*>(&(it->rgb)); // TODO: there are other ways to encode color than this one
+        colors[0] = ((rgb >> 16) & 0xff);
+        colors[1] = ((rgb >> 8) & 0xff);
+        colors[2] = (rgb & 0xff);
+        m_octree->averageNodeColor(it->x, it->y, it->z, colors[0], colors[1], colors[2]);
+#endif
+      }
+    }
+  }
   // now update all cells per the accumulated update
   for (SensorUpdateKeyMap::iterator it = update_cells.begin(), end=update_cells.end(); it!= end; it++) {
     m_octree->updateNode(it->key, it->value);

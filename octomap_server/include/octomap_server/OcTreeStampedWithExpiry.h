@@ -128,6 +128,12 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
 
     virtual void updateNodeLogOdds(OcTreeNodeStampedWithExpiry* node, const float& update) const;
 
+    virtual void expandNode(NodeType* node);
+    virtual bool pruneNode(NodeType* node);
+
+    bool getSizeChanged() {return size_changed;}
+    void setSizeChanged(bool new_value) {size_changed = new_value;}
+
     time_t getMaxExpiryDelta() const {
       return a_coeff_log_odds_* clamping_thres_max * clamping_thres_max + c_coeff_;
     }

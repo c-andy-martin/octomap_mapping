@@ -191,6 +191,31 @@ void OcTreeStampedWithExpiry::updateNodeLogOdds(OcTreeNodeStampedWithExpiry* nod
   node->setExpiry(0);
 }
 
+void OcTreeStampedWithExpiry::expandNode(OcTreeStampedWithExpiry::NodeType* node)
+{
+  bool old_size_changed = size_changed;
+  octomap::OccupancyOcTreeBase<NodeType>::expandNode(node);
+  // This should really be fixed upstream, if it ever is, we can remove
+  if (!old_size_changed && size_changed)
+  {
+    // override size_changed back to false, expanding can't alter extents
+    size_changed = false;
+  }
+}
+
+bool OcTreeStampedWithExpiry::pruneNode(OcTreeStampedWithExpiry::NodeType* node)
+{
+  bool old_size_changed = size_changed;
+  bool rv = octomap::OccupancyOcTreeBase<NodeType>::pruneNode(node);
+  // This should really be fixed upstream, if it ever is, we can remove
+  if (!old_size_changed && size_changed)
+  {
+    // override size_changed back to false, pruning can't alter extents
+    size_changed = false;
+  }
+  return rv;
+}
+
 OcTreeStampedWithExpiry::StaticMemberInitializer OcTreeStampedWithExpiry::ocTreeStampedWithExpiryMemberInit;
 
 } // end namespace

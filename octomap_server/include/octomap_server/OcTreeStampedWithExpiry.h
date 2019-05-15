@@ -3,6 +3,7 @@
 
 #include <ctime>
 #include <algorithm>
+#include <limits>
 #include <stdlib.h>
 #include <octomap/OcTreeNode.h>
 #include <octomap/OccupancyOcTreeBase.h>
@@ -121,6 +122,17 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
     // This function should be called periodically.
     void expireNodes();
 
+    // Calculate min/max octree keys based on given parameters
+    void calculateBounds(double xy_distance,
+                         double z_height,
+                         double z_depth,
+                         const octomap::point3d& base_position,
+                         octomap::OcTreeKey* min_key,
+                         octomap::OcTreeKey* max_key);
+
+    // Delete nodes that are out of bounds
+    void outOfBounds(double xy_distance, double z_height, double z_depth, const octomap::point3d& base_position);
+
     virtual OcTreeNodeStampedWithExpiry* updateNode(const octomap::OcTreeKey& key, float log_odds_update, bool lazy_eval = false);
     virtual OcTreeNodeStampedWithExpiry* updateNode(const octomap::OcTreeKey& key, bool occupied, bool lazy_eval = false) {
       return updateNode(key, occupied ? prob_hit_log : prob_miss_log, lazy_eval);
@@ -138,6 +150,18 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
       return a_coeff_log_odds_* clamping_thres_max * clamping_thres_max + c_coeff_;
     }
 
+    inline octomap::key_type coordToKeyClamped(double coordinate) const {
+      if (coordinate > keyToCoord(std::numeric_limits<octomap::key_type>::max())) {
+        return std::numeric_limits<octomap::key_type>::max();
+      } else if (coordinate < keyToCoord(std::numeric_limits<octomap::key_type>::min())) {
+        return std::numeric_limits<octomap::key_type>::min();
+      }
+      return coordToKey(coordinate);
+    }
+
+    inline octomap::OcTreeKey coordToKeyClamped(double x, double y, double z) const {
+      return octomap::OcTreeKey(coordToKeyClamped(x), coordToKeyClamped(y), coordToKeyClamped(z));
+    }
   protected:
     // Quadratic delta-t expiration coefficients. The input is the number of
     // times a particular mode was marked from the default value (which would
@@ -159,6 +183,14 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
     // Return true if this node has expired.
     // Assume node is valid.
     bool expireNodeRecurs(OcTreeNodeStampedWithExpiry* node);
+
+    // Delete nodes recursively that are not inside the given min/max keys.
+    // Assume node is valid.
+    bool outOfBoundsRecurs(OcTreeNodeStampedWithExpiry* node,
+                           const octomap::OcTreeKey& key,
+                           int depth,
+                           const octomap::OcTreeKey& minKey,
+                           const octomap::OcTreeKey& maxKey);
 
     /**
      * Static member object which ensures that this OcTree's prototype

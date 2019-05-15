@@ -27,6 +27,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <limits>
 #include <octomap_server/OctomapServer.h>
 #include <octomap_server/SensorUpdateKeyMap.h>
 
@@ -77,7 +78,13 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_incrementalUpdate(false),
   m_initConfig(true),
   m_expirePeriod(0.0),
-  m_expireLastTime(ros::Time::now())
+  m_expireLastTime(ros::Time::now()),
+  m_baseDistanceLimitPeriod(0.0),
+  m_baseDistanceLimitLastTime(ros::Time::now()),
+  m_base2DDistanceLimit(std::numeric_limits<double>::max()),
+  m_baseHeightLimit(std::numeric_limits<double>::max()),
+  m_baseDepthLimit(std::numeric_limits<double>::max()),
+  m_baseToWorldValid(false)
 {
   double probHit, probMiss, thresMin, thresMax;
 
@@ -127,6 +134,11 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
 
   // only enabled when expireTimeDelta is positive
   m_nh_private.param("expire_time_delta", m_expirePeriod, m_expirePeriod);
+
+  m_nh_private.param("base_distance_limit_time_delta", m_baseDistanceLimitPeriod, m_baseDistanceLimitPeriod);
+  m_nh_private.param("base_2d_distance_limit", m_base2DDistanceLimit, m_base2DDistanceLimit);
+  m_nh_private.param("base_height_limit", m_baseHeightLimit, m_baseHeightLimit);
+  m_nh_private.param("base_depth_limit", m_baseDepthLimit, m_baseDepthLimit);
 
   if (m_filterGroundPlane && (m_pointcloudMinZ > 0.0 || m_pointcloudMaxZ < 0.0)){
     ROS_WARN_STREAM("You enabled ground filtering but incoming pointclouds will be pre-filtered in ["
@@ -218,6 +230,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
       std::string ground_topic = "";
       std::string nonground_topic = "";
       std::string nonclearing_nonground_topic = "";
+      std::string sensor_origin_frame_id = "";
       XmlRpc::XmlRpcValue& segmented_topic(segmented_topics[i]);
       if (segmented_topic.getType() == XmlRpc::XmlRpcValue::TypeStruct) {
         std::string member;
@@ -242,9 +255,18 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
             nonclearing_nonground_topic = static_cast<std::string>(v);
           }
         }
+        member = "sensor_origin_frame_id";
+        if (segmented_topic.hasMember(member)) {
+          XmlRpc::XmlRpcValue& v(segmented_topic[member]);
+          if (v.getType() == XmlRpc::XmlRpcValue::TypeString) {
+            sensor_origin_frame_id = static_cast<std::string>(v);
+          }
+        }
       }
       if (!ground_topic.empty() && !nonground_topic.empty()) {
-        addSegmentedCloudTopic(ground_topic, nonground_topic, nonclearing_nonground_topic);
+        addSegmentedCloudTopic(ground_topic, nonground_topic, nonclearing_nonground_topic, sensor_origin_frame_id);
+      } else {
+        ROS_WARN("In current implementation segmented topics must have both ground and nonground topics");
       }
     }
   }
@@ -372,14 +394,21 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr
   PCLPointCloud pc_ground; // segmented ground plane
   PCLPointCloud pc_nonground; // everything else
 
+  if (m_filterGroundPlane || m_baseDistanceLimitPeriod > 0.0){
+    try{
+      m_tfListener.waitForTransform(m_worldFrameId, m_baseFrameId, cloud->header.stamp, ros::Duration(0.2));
+      m_tfListener.lookupTransform(m_worldFrameId, m_baseFrameId, cloud->header.stamp, m_baseToWorldTf);
+      m_baseToWorldValid = true;
+    }catch(tf::TransformException& ex){
+      ROS_ERROR_STREAM("Transform error when finding base to world transform: " << ex.what());
+    }
+  }
+
   if (m_filterGroundPlane){
-    tf::StampedTransform sensorToBaseTf, baseToWorldTf;
+    tf::StampedTransform sensorToBaseTf;
     try{
       m_tfListener.waitForTransform(m_baseFrameId, cloud->header.frame_id, cloud->header.stamp, ros::Duration(0.2));
       m_tfListener.lookupTransform(m_baseFrameId, cloud->header.frame_id, cloud->header.stamp, sensorToBaseTf);
-      m_tfListener.lookupTransform(m_worldFrameId, m_baseFrameId, cloud->header.stamp, baseToWorldTf);
-
-
     }catch(tf::TransformException& ex){
       ROS_ERROR_STREAM( "Transform error for ground plane filter: " << ex.what() << ", quitting callback.\n"
                         "You need to set the base_frame_id or disable filter_ground.");
@@ -388,7 +417,7 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr
 
     Eigen::Matrix4f sensorToBase, baseToWorld;
     pcl_ros::transformAsMatrix(sensorToBaseTf, sensorToBase);
-    pcl_ros::transformAsMatrix(baseToWorldTf, baseToWorld);
+    pcl_ros::transformAsMatrix(m_baseToWorldTf, baseToWorld);
 
     // transform pointcloud from sensor frame to fixed robot frame
     pcl::transformPointCloud(pc, pc, sensorToBase);
@@ -433,7 +462,8 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr
 void OctomapServer::insertSegmentedCloudCallback(
     const sensor_msgs::PointCloud2::ConstPtr& ground_cloud,
     const sensor_msgs::PointCloud2::ConstPtr& nonground_cloud,
-    const sensor_msgs::PointCloud2::ConstPtr& nonclearing_nonground_cloud)
+    const sensor_msgs::PointCloud2::ConstPtr& nonclearing_nonground_cloud,
+    const std::string& sensor_origin_frame_id)
 {
   ros::WallTime startTime = ros::WallTime::now();
 
@@ -447,10 +477,23 @@ void OctomapServer::insertSegmentedCloudCallback(
     pcl::fromROSMsg(*nonclearing_nonground_cloud, pc_nonclearing_nonground);
   }
 
+  if (m_baseDistanceLimitPeriod > 0.0){
+    try{
+      m_tfListener.waitForTransform(m_worldFrameId, m_baseFrameId, nonground_cloud->header.stamp, ros::Duration(0.2));
+      m_tfListener.lookupTransform(m_worldFrameId, m_baseFrameId, nonground_cloud->header.stamp, m_baseToWorldTf);
+      m_baseToWorldValid = true;
+    }catch(tf::TransformException& ex){
+      ROS_ERROR_STREAM("Transform error when finding base to world transform: " << ex.what());
+    }
+  }
+
   tf::StampedTransform sensorToWorldTf;
+  tf::StampedTransform sensorOriginTf;
   // Assume exact time-synchronization, only lookup one TF
   try {
     m_tfListener.lookupTransform(m_worldFrameId, nonground_cloud->header.frame_id, nonground_cloud->header.stamp, sensorToWorldTf);
+    std::string sensor_origin_frame = sensor_origin_frame_id.size() ? sensor_origin_frame_id : nonground_cloud->header.frame_id;
+    m_tfListener.lookupTransform(m_worldFrameId, sensor_origin_frame, nonground_cloud->header.stamp, sensorOriginTf);
   } catch(tf::TransformException& ex){
     ROS_ERROR_STREAM( "Transform error of sensor data: " << ex.what() << ", quitting callback");
     return;
@@ -496,7 +539,7 @@ void OctomapServer::insertSegmentedCloudCallback(
   pass_z.setInputCloud(pc_nonclearing_nonground.makeShared());
   pass_z.filter(pc_nonclearing_nonground);
 
-  insertScan(sensorToWorldTf.getOrigin(), pc_ground, pc_nonground, pc_nonclearing_nonground);
+  insertScan(sensorOriginTf.getOrigin(), pc_ground, pc_nonground, pc_nonclearing_nonground);
 
   double total_elapsed = (ros::WallTime::now() - startTime).toSec();
   ROS_DEBUG("Pointcloud insertion in OctomapServer done (%zu+%zu pts (ground/nonground), %f sec)", pc_ground.size(), pc_nonground.size(), total_elapsed);
@@ -531,6 +574,17 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   if (floor_truncation_)
   {
     update_cells.setFloorTruncation(m_octree->coordToKey(floor_truncation_z_));
+  }
+  if (m_baseDistanceLimitPeriod > 0.0)
+  {
+    tf::Vector3 origin = m_baseToWorldTf.getOrigin();
+    octomap::point3d base_position(origin.x(), origin.y(), origin.z());
+    octomap::OcTreeKey minKey;
+    octomap::OcTreeKey maxKey;
+    m_octree->calculateBounds(m_base2DDistanceLimit, m_baseHeightLimit, m_baseDepthLimit, base_position,
+                              &minKey, &maxKey);
+    update_cells.setMinKey(minKey);
+    update_cells.setMaxKey(maxKey);
   }
   // insert ground points only as free:
   for (PCLPointCloud::const_iterator it = ground.begin(); it != ground.end(); ++it){
@@ -718,6 +772,30 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
     }
   }
 
+  // Delete based on distance periodically.
+  // Skip if we just pruned or expired, as this is also (relatively) expensive
+  if (m_baseDistanceLimitPeriod > 0.0 && !pruned && m_expireLastTime != now)
+  {
+    if (m_baseToWorldValid && now >= m_baseDistanceLimitLastTime + ros::Duration(m_baseDistanceLimitPeriod)) {
+      m_baseDistanceLimitLastTime = now;
+      tf::Vector3 origin = m_baseToWorldTf.getOrigin();
+      std::stringstream ss;
+      ss << "Limiting ";
+      if (m_base2DDistanceLimit < std::numeric_limits<octomap::key_type>::max()) {
+        ss << "2D distance to " << m_base2DDistanceLimit;
+      }
+      if (m_baseHeightLimit < std::numeric_limits<octomap::key_type>::max()) {
+        ss << " height to " << m_baseHeightLimit;
+      }
+      if (m_baseDepthLimit < std::numeric_limits<octomap::key_type>::max()) {
+        ss << " depth to " << m_baseDepthLimit;
+      }
+      ss << " from (" << origin.x() << ", " << origin.y() << ", " << origin.z() << ")";
+      ROS_INFO_STREAM(ss.str());
+      octomap::point3d base_position(origin.x(), origin.y(), origin.z());
+      m_octree->outOfBounds(m_base2DDistanceLimit, m_baseHeightLimit, m_baseDepthLimit, base_position);
+    }
+  }
 #ifdef COLOR_OCTOMAP_SERVER
   if (colors)
   {

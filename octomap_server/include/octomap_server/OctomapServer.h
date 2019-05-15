@@ -106,7 +106,8 @@ public:
   virtual void insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud);
   virtual void insertSegmentedCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& ground_cloud,
                                             const sensor_msgs::PointCloud2::ConstPtr& nonground_cloud,
-                                            const sensor_msgs::PointCloud2::ConstPtr& nonclearing_nonground_cloud);
+                                            const sensor_msgs::PointCloud2::ConstPtr& nonclearing_nonground_cloud,
+                                            const std::string& sensor_origin_frame_id);
   virtual bool openFile(const std::string& filename);
 
 protected:
@@ -133,7 +134,10 @@ protected:
   }
 
   // Add an input pre-segmented point cloud topic
-  inline void addSegmentedCloudTopic(const std::string &ground_topic, const std::string &nonground_topic, const std::string &nonclearing_nonground_topic) {
+  inline void addSegmentedCloudTopic(const std::string &ground_topic,
+                                     const std::string &nonground_topic,
+                                     const std::string &nonclearing_nonground_topic,
+                                     const std::string &sensor_origin_frame_id) {
     boost::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2> > groundPointCloudSub(
       new message_filters::Subscriber<sensor_msgs::PointCloud2> (
         m_nh,
@@ -175,7 +179,7 @@ protected:
         )
       );
       m_sync2->registerCallback(boost::bind(&OctomapServer::insertSegmentedCloudCallback, this, _1, _2,
-                                            sensor_msgs::PointCloud2::ConstPtr()));
+                                            sensor_msgs::PointCloud2::ConstPtr(), sensor_origin_frame_id));
       m_sync2s.push_back(m_sync2);
     }
     else
@@ -204,7 +208,7 @@ protected:
           5
         )
       );
-      m_sync3->registerCallback(boost::bind(&OctomapServer::insertSegmentedCloudCallback, this, _1, _2, _3));
+      m_sync3->registerCallback(boost::bind(&OctomapServer::insertSegmentedCloudCallback, this, _1, _2, _3, sensor_origin_frame_id));
       m_sync3s.push_back(m_sync3);
 
       m_pointCloudSubs.push_back(nonclearingNongroundPointCloudSub);
@@ -337,7 +341,7 @@ protected:
 
   double m_maxRange;
   std::string m_worldFrameId; // the map frame
-  std::string m_baseFrameId; // base of the robot for ground plane filtering
+  std::string m_baseFrameId; // base of the robot for ground plane filtering and distance limit
   bool m_useHeightMap;
   bool m_useTimedMap;
   std_msgs::ColorRGBA m_color;
@@ -391,6 +395,16 @@ protected:
   // time-based degrading
   double m_expirePeriod;
   ros::Time m_expireLastTime;
+
+  // base distance-based deletion (<= 0.0 is disabled)
+  double m_baseDistanceLimitPeriod;
+  ros::Time m_baseDistanceLimitLastTime;
+  double m_base2DDistanceLimit;
+  double m_baseHeightLimit;
+  double m_baseDepthLimit;
+  bool m_baseToWorldValid;
+  tf::StampedTransform m_baseToWorldTf;
+
 };
 }
 

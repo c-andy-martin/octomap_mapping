@@ -1,3 +1,4 @@
+#include <limits>
 #include "octomap_server/SensorUpdateKeyMap.h"
 
 namespace octomap_server {
@@ -33,6 +34,12 @@ SensorUpdateKeyMap::SensorUpdateKeyMap(size_t initial_capacity, double max_load_
   , free_cells_(NULL)
   , free_cells_capacity_(0)
   , truncate_floor_(false)
+  , min_key_(std::numeric_limits<octomap::key_type>::min(),
+             std::numeric_limits<octomap::key_type>::min(),
+             std::numeric_limits<octomap::key_type>::min())
+  , max_key_(std::numeric_limits<octomap::key_type>::max(),
+             std::numeric_limits<octomap::key_type>::max(),
+             std::numeric_limits<octomap::key_type>::max())
 {
   initializeNodeCache(initial_capacity);
   calculateTableCapacity();
@@ -89,6 +96,10 @@ inline bool SensorUpdateKeyMap::insertFreeByIndexImpl(const octomap::OcTreeKey& 
 // Returns true if a node was inserted, false if the node already existed
 bool SensorUpdateKeyMap::insertFree(octomap::OcTreeKey& key)
 {
+  if (isKeyOutOfBounds(key))
+  {
+    return false;
+  }
   // apply floor truncation to the key first, moving the point to the floor
   // if floor truncation is enabled and the z coord is below the floor
   if (truncate_floor_ && key[2] < truncate_floor_z_) {
@@ -221,6 +232,10 @@ bool SensorUpdateKeyMap::insertFreeRay(const octomap::point3d& origin, const oct
   // Incremental phase
   for (;;) {
 
+    // We have moved out-of-bounds, stop tracing
+    if (isKeyOutOfBounds(current_key))
+      break;
+
     // add the cell
     free_cells_[free_cells_count++] = current_key;
 
@@ -260,6 +275,11 @@ bool SensorUpdateKeyMap::insertFreeRay(const octomap::point3d& origin, const oct
 // Returns true if a node was inserted, false if the node already existed
 bool SensorUpdateKeyMap::insertOccupied(octomap::OcTreeKey& key)
 {
+  if (isKeyOutOfBounds(key))
+  {
+    return false;
+  }
+
   // apply floor truncation to the key first, moving the point to the floor
   // if floor truncation is enabled and the z coord is below the floor
   if (truncate_floor_ && key[2] < truncate_floor_z_) {
@@ -293,6 +313,8 @@ bool SensorUpdateKeyMap::insertOccupied(octomap::OcTreeKey& key)
 // Returns true if a node was inserted, false if the node already existed
 bool SensorUpdateKeyMap::insert(const octomap::OcTreeKey& key, bool value)
 {
+  if (isKeyOutOfBounds(key)) return false;
+
   octomap::OcTreeKey::KeyHash hasher;
   size_t hash = hasher(key);
   size_t index = hash % table_.size();

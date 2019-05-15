@@ -1,6 +1,7 @@
 #ifndef OCTOMAP_SENSOR_UPDATE_KEY_MAP_HH
 #define OCTOMAP_SENSOR_UPDATE_KEY_MAP_HH
 
+#include <limits>
 #include <octomap/octomap.h>
 #include <octomap/OcTreeKey.h>
 
@@ -36,8 +37,15 @@ public:
   ~SensorUpdateKeyMap();
 
   void setFloorTruncation(octomap::key_type floor_z);
+  void setMinKey(const octomap::OcTreeKey& min_key) {min_key_ = min_key;}
+  void setMaxKey(const octomap::OcTreeKey& max_key) {max_key_ = max_key;}
+  inline bool isKeyOutOfBounds(const octomap::OcTreeKey& key)
+  {
+    return !(min_key_[0] <= key[0] && key[0] <= max_key_[0] &&
+        min_key_[1] <= key[1] && key[1] <= max_key_[1] &&
+        min_key_[2] <= key[2] && key[2] <= max_key_[2]);
+  }
   bool insertFree(octomap::OcTreeKey& key);
-  bool insertFreeCells(const octomap::OcTreeKey *free_cells, size_t free_cells_count);
   bool insertFreeRay(const octomap::point3d& origin, const octomap::point3d& end,
                      const octomap::OcTreeKey& key_origin, const octomap::OcTreeKey& key_end,
                      const octomap::point3d& origin_boundary,
@@ -116,6 +124,7 @@ public:
 protected:
   std::vector<Node*> table_;
 
+  bool insertFreeCells(const octomap::OcTreeKey *free_cells, size_t free_cells_count);
   Node* allocNodeFromCache();
 
   void initializeNodeCache(size_t capacity);
@@ -146,6 +155,8 @@ protected:
   bool truncate_floor_;
   octomap::key_type truncate_floor_z_;
 
+  octomap::OcTreeKey min_key_;
+  octomap::OcTreeKey max_key_;
 private:
   // non-copyable. we could implement a deep copy, but there is no use case
   // for it yet.

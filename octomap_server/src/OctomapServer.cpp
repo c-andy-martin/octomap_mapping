@@ -84,6 +84,9 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_base2DDistanceLimit(std::numeric_limits<double>::max()),
   m_baseHeightLimit(std::numeric_limits<double>::max()),
   m_baseDepthLimit(std::numeric_limits<double>::max()),
+  m_update2DDistanceLimit(std::numeric_limits<double>::max()),
+  m_updateHeightLimit(std::numeric_limits<double>::max()),
+  m_updateDepthLimit(std::numeric_limits<double>::max()),
   m_baseToWorldValid(false)
 {
   double probHit, probMiss, thresMin, thresMax;
@@ -139,6 +142,17 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_nh_private.param("base_2d_distance_limit", m_base2DDistanceLimit, m_base2DDistanceLimit);
   m_nh_private.param("base_height_limit", m_baseHeightLimit, m_baseHeightLimit);
   m_nh_private.param("base_depth_limit", m_baseDepthLimit, m_baseDepthLimit);
+  m_nh_private.param("update_2d_distance_limit", m_update2DDistanceLimit, m_update2DDistanceLimit);
+  m_nh_private.param("update_height_limit", m_updateHeightLimit, m_updateHeightLimit);
+  m_nh_private.param("update_depth_limit", m_updateDepthLimit, m_updateDepthLimit);
+  // It makes no sense for the sensor update limits to be bigger than the
+  // robot base limits. Clip the update limits to the base ones.
+  if (m_base2DDistanceLimit < m_update2DDistanceLimit)
+    m_update2DDistanceLimit = m_base2DDistanceLimit;
+  if (m_baseHeightLimit < m_updateHeightLimit)
+    m_updateHeightLimit = m_baseHeightLimit;
+  if (m_baseDepthLimit < m_updateDepthLimit)
+    m_updateDepthLimit = m_baseDepthLimit;
 
   if (m_filterGroundPlane && (m_pointcloudMinZ > 0.0 || m_pointcloudMaxZ < 0.0)){
     ROS_WARN_STREAM("You enabled ground filtering but incoming pointclouds will be pre-filtered in ["
@@ -581,7 +595,7 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
     octomap::point3d base_position(origin.x(), origin.y(), origin.z());
     octomap::OcTreeKey minKey;
     octomap::OcTreeKey maxKey;
-    m_octree->calculateBounds(m_base2DDistanceLimit, m_baseHeightLimit, m_baseDepthLimit, base_position,
+    m_octree->calculateBounds(m_update2DDistanceLimit, m_updateHeightLimit, m_updateDepthLimit, base_position,
                               &minKey, &maxKey);
     update_cells.setMinKey(minKey);
     update_cells.setMaxKey(maxKey);

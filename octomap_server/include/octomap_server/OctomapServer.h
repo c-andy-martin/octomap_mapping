@@ -402,6 +402,9 @@ protected:
   double m_base2DDistanceLimit;
   double m_baseHeightLimit;
   double m_baseDepthLimit;
+  double m_update2DDistanceLimit;
+  double m_updateHeightLimit;
+  double m_updateDepthLimit;
   bool m_baseToWorldValid;
   tf::StampedTransform m_baseToWorldTf;
 

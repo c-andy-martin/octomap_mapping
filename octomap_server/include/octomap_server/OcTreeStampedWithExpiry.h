@@ -112,7 +112,7 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
       c_coeff_free_ = c_coeff_free;
     }
 
-    std::string getTreeType() const {return "OcTreeStampedWithExpiry";}
+    std::string getTreeType() const {return "OcTree";}
 
     // Time of last update
     time_t getLastUpdateTime() const {return last_expire_time;}
@@ -204,7 +204,7 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
       StaticMemberInitializer() {
         OcTreeStampedWithExpiry* tree = new OcTreeStampedWithExpiry(0.1);
         tree->clearKeyRays();
-        AbstractOcTree::registerTreeType(tree);
+        //AbstractOcTree::registerTreeType(tree);
       }
 
       /**

@@ -45,6 +45,7 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
 : m_nh(),
   m_reconfigureServer(m_config_mutex),
   m_octree(NULL),
+  m_octree_delta_(NULL),
   m_maxRange(-1.0),
   m_worldFrameId("/map"), m_baseFrameId("base_footprint"),
   m_useHeightMap(true),
@@ -53,10 +54,12 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   m_colorFactor(0.8),
   m_latchedTopics(true),
   m_publishFreeSpace(false),
-  m_publishPeriod(0.0),
+  m_publish3DMapPeriod(0.0),
   m_publish2DPeriod(0.0),
-  m_publishLastTime(ros::Time::now()),
+  m_publish3DMapUpdatePeriod(0.0),
+  m_publish3DMapLastTime(ros::Time::now()),
   m_publish2DLastTime(ros::Time::now()),
+  m_publish3DMapUpdateLastTime(ros::Time::now()),
   m_res(0.05),
   m_treeDepth(0),
   m_maxTreeDepth(0),
@@ -190,6 +193,13 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   m_octree->setProbMiss(probMiss);
   m_octree->setClampingThresMin(thresMin);
   m_octree->setClampingThresMax(thresMax);
+  // Delta octmap will have identical properties
+  m_octree_delta_ = new OcTreeT(m_res);
+  m_octree_delta_->setProbHit(probHit);
+  m_octree_delta_->setProbMiss(probMiss);
+  m_octree_delta_->setClampingThresMin(thresMin);
+  m_octree_delta_->setClampingThresMax(thresMax);
+
   m_treeDepth = m_octree->getTreeDepth();
   m_maxTreeDepth = m_treeDepth;
   m_gridmap.info.resolution = m_res;
@@ -223,7 +233,8 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   m_colorFree.a = a;
 
   private_nh.param("publish_free_space", m_publishFreeSpace, m_publishFreeSpace);
-  private_nh.param("publish_period", m_publishPeriod, m_publishPeriod);
+  private_nh.param("publish_3d_map_period", m_publish3DMapPeriod, m_publish3DMapPeriod);
+  private_nh.param("publish_3d_map_update_period", m_publish3DMapUpdatePeriod, m_publish3DMapUpdatePeriod);
   private_nh.param("publish_2d_period", m_publish2DPeriod, m_publish2DPeriod);
 
   private_nh.param("latch", m_latchedTopics, m_latchedTopics);
@@ -235,6 +246,7 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   m_markerPub = m_nh.advertise<visualization_msgs::MarkerArray>("occupied_cells_vis_array", 1, m_latchedTopics);
   m_binaryMapPub = m_nh.advertise<Octomap>("octomap_binary", 1, m_latchedTopics);
   m_fullMapPub = m_nh.advertise<Octomap>("octomap_full", 1, m_latchedTopics);
+  m_mapUpdatePub = m_nh.advertise<Octomap>("octomap_update", 1, m_latchedTopics);
   m_pointCloudPub = m_nh.advertise<sensor_msgs::PointCloud2>("octomap_point_cloud_centers", 1, m_latchedTopics);
   m_mapPub = m_nh.advertise<nav_msgs::OccupancyGrid>("projected_map", 5, m_latchedTopics);
   m_fmarkerPub = m_nh.advertise<visualization_msgs::MarkerArray>("free_cells_vis_array", 1, m_latchedTopics);
@@ -316,6 +328,11 @@ OctomapServer::~OctomapServer(){
   if (m_octree){
     delete m_octree;
     m_octree = NULL;
+  }
+
+  if (m_octree_delta_){
+    delete m_octree_delta_;
+    m_octree_delta_ = NULL;
   }
 
 }
@@ -743,8 +760,10 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
     }
   }
   // now update all cells per the accumulated update
+  // JAT: Possible spot to gather update information.  For now, just worry about updating in this case
   for (SensorUpdateKeyMap::iterator it = update_cells.begin(), end=update_cells.end(); it!= end; it++) {
     m_octree->updateNode(it->key, it->value);
+    m_octree_delta_->updateNode(it->key, it->value);
   }
 
   // TODO: eval lazy+updateInner vs. proper insertion
@@ -815,6 +834,9 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
       m_octree->outOfBounds(m_base2DDistanceLimit, m_baseHeightLimit, m_baseDepthLimit, base_position);
     }
   }
+
+
+  publishAll(ros::Time::now());
 #ifdef COLOR_OCTOMAP_SERVER
   if (colors)
   {
@@ -829,36 +851,43 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
 void OctomapServer::publishAll(const ros::Time& rostime){
 
   // Figure out which category to publish based on rate (if enabled)
-  bool publish_all = true;
+  bool publish_maps = true;
+  bool publish_updates = true;
   bool publish_3d = true;
   bool publish_2d = true;
-  if (m_publishPeriod > 0.0 && rostime < m_publishLastTime + ros::Duration(m_publishPeriod)) {
-    publish_all = false;
+  if (m_publish3DMapPeriod > 0.0 && rostime < m_publish3DMapLastTime + ros::Duration(m_publish3DMapPeriod)) {
+    publish_maps = false;
+  }
+  if (m_publish3DMapUpdatePeriod > 0.0 && rostime < m_publish3DMapUpdateLastTime + ros::Duration(m_publish3DMapUpdatePeriod)) {
+    publish_updates = false;
   }
   if (m_publish2DPeriod > 0.0 && rostime < m_publish2DLastTime + ros::Duration(m_publish2DPeriod)) {
     publish_2d = false;
   }
   // Publishing 3D topics follows publishing all
-  publish_3d = publish_all;
-  if (publish_all)
+  publish_3d = publish_maps;
+  if (publish_maps)
   {
     publish_2d = true;
   }
-  if (!publish_2d && !publish_3d)
+  if (!publish_2d && !publish_3d && !publish_updates)
   {
     // there is nothing to do.
     return;
   }
 
-  if (m_useTimedMap && publish_all){
+  if (m_useTimedMap && publish_maps){
     // If using a timed map, be sure all expiry's are up to date.
     // The expiration may not be running in-sync
     // Do this first, in the odd case that we expire all the nodes
     m_octree->expireNodes();
   }
 
-  if (publish_all) {
-    m_publishLastTime = rostime;
+  if (publish_maps) {
+    m_publish3DMapLastTime = rostime;
+  }
+  if (publish_updates) {
+    m_publish3DMapUpdateLastTime = rostime;
   }
   if (publish_2d) {
     m_publish2DLastTime = rostime;
@@ -877,6 +906,7 @@ void OctomapServer::publishAll(const ros::Time& rostime){
   bool publishPointCloud = (m_latchedTopics || m_pointCloudPub.getNumSubscribers() > 0);
   bool publishBinaryMap = (m_latchedTopics || m_binaryMapPub.getNumSubscribers() > 0);
   bool publishFullMap = (m_latchedTopics || m_fullMapPub.getNumSubscribers() > 0);
+  bool publishMapUpdate = (m_latchedTopics || m_mapUpdatePub.getNumSubscribers() > 0);
   m_publish2DMap = (m_latchedTopics || m_mapPub.getNumSubscribers() > 0);
 
   // Update above based on publish period booleans set above.
@@ -887,6 +917,10 @@ void OctomapServer::publishAll(const ros::Time& rostime){
     publishPointCloud = false;
     publishBinaryMap = false;
     publishFullMap = false;
+  }
+  if (!publish_updates)
+  {
+    publishMapUpdate = false;
   }
   if (!publish_2d)
   {
@@ -1141,10 +1175,20 @@ void OctomapServer::publishAll(const ros::Time& rostime){
   }
 
   if (publishBinaryMap)
+  {
     publishBinaryOctoMap(rostime);
+  }
 
   if (publishFullMap)
+  {
     publishFullOctoMap(rostime);
+  }
+
+  if (publishMapUpdate)
+  {
+    publishOctoMapUpdate(rostime);
+    m_octree_delta_->clear();
+  }
 
 
   double total_elapsed = (ros::WallTime::now() - startTime).toSec();
@@ -1269,6 +1313,19 @@ void OctomapServer::publishFullOctoMap(const ros::Time& rostime) const{
     m_fullMapPub.publish(map);
   else
     ROS_ERROR("Error serializing OctoMap");
+
+}
+
+void OctomapServer::publishOctoMapUpdate(const ros::Time& rostime) const{
+
+  Octomap map_delta;
+  map_delta.header.frame_id = m_worldFrameId;
+  map_delta.header.stamp = rostime;
+
+  if (octomap_msgs::fullMapToMsg(*m_octree_delta_, map_delta))
+    m_mapUpdatePub.publish(map_delta);
+  else
+    ROS_ERROR("Error serializing OctoMap Update");
 
 }
 

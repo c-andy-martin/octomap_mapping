@@ -240,6 +240,7 @@ protected:
   void reconfigureCallback(octomap_server::OctomapServerConfig& config, uint32_t level);
   void publishBinaryOctoMap(const ros::Time& rostime = ros::Time::now()) const;
   void publishFullOctoMap(const ros::Time& rostime = ros::Time::now()) const;
+  void publishOctoMapUpdate(const ros::Time& rostime = ros::Time::now()) const;
   virtual void publishAll(const ros::Time& rostime = ros::Time::now());
 
   /**
@@ -318,7 +319,7 @@ protected:
 
   static std_msgs::ColorRGBA heightMapColor(double h);
   ros::NodeHandle m_nh;
-  ros::Publisher  m_markerPub, m_binaryMapPub, m_fullMapPub, m_pointCloudPub, m_collisionObjectPub, m_mapPub, m_cmapPub, m_fmapPub, m_fmarkerPub;
+  ros::Publisher  m_markerPub, m_binaryMapPub, m_fullMapPub, m_mapUpdatePub, m_pointCloudPub, m_collisionObjectPub, m_mapPub, m_cmapPub, m_fmapPub, m_fmarkerPub;
   std::vector<boost::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2> > > m_pointCloudSubs;
   std::vector<boost::shared_ptr<tf::MessageFilter<sensor_msgs::PointCloud2> > > m_tfPointCloudSubs;
   std::vector<boost::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::PointCloud2, sensor_msgs::PointCloud2> > > m_sync2s;
@@ -329,6 +330,7 @@ protected:
   dynamic_reconfigure::Server<OctomapServerConfig> m_reconfigureServer;
 
   OcTreeT* m_octree;
+  OcTreeT* m_octree_delta_;
   octomap::KeyRay m_keyRay;  // temp storage for ray casting
   octomap::OcTreeKey m_updateBBXMin;
   octomap::OcTreeKey m_updateBBXMax;
@@ -344,8 +346,10 @@ protected:
 
   bool m_latchedTopics;
   bool m_publishFreeSpace;
-  double m_publishPeriod;
-  ros::Time m_publishLastTime;
+  double m_publish3DMapPeriod;
+  ros::Time m_publish3DMapLastTime;
+  double m_publish3DMapUpdatePeriod;
+  ros::Time m_publish3DMapUpdateLastTime;
   double m_publish2DPeriod;
   ros::Time m_publish2DLastTime;
 

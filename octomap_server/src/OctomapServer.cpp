@@ -192,6 +192,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_octree->setProbMiss(probMiss);
   m_octree->setClampingThresMin(thresMin);
   m_octree->setClampingThresMax(thresMax);
+  m_octree->enableChangeDetection(true);
   // Delta octmap will have identical properties
   m_octree_delta_ = new OcTreeT(m_res);
   m_octree_delta_->setProbHit(probHit);
@@ -758,7 +759,6 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   // JAT: Possible spot to gather update information.  For now, just worry about updating in this case
   for (SensorUpdateKeyMap::iterator it = update_cells.begin(), end=update_cells.end(); it!= end; it++) {
     m_octree->updateNode(it->key, it->value);
-    m_octree_delta_->updateNode(it->key, it->value);
   }
 
   // TODO: eval lazy+updateInner vs. proper insertion
@@ -1183,8 +1183,15 @@ void OctomapServer::publishAll(const ros::Time& rostime){
 
   if (publishMapUpdate)
   {
+    octomap::KeyBoolMap::const_iterator it;
+    for (it=m_octree->changedKeysBegin(); it!=m_octree->changedKeysEnd(); it++)
+    {
+      if(m_octree->search(it->first, m_octree->getTreeDepth()))
+        m_octree_delta_->setNodeValue(it->first, m_octree->search(it->first, m_octree->getTreeDepth())->getValue());
+    }
     publishOctoMapUpdate(rostime);
     m_octree_delta_->clear();
+    m_octree->resetChangeDetection();
   }
 
 
@@ -1318,6 +1325,7 @@ void OctomapServer::publishOctoMapUpdate(const ros::Time& rostime) const{
   Octomap map_delta;
   map_delta.header.frame_id = m_worldFrameId;
   map_delta.header.stamp = rostime;
+
 
   if (octomap_msgs::fullMapToMsg(*m_octree_delta_, map_delta))
     m_mapUpdatePub.publish(map_delta);

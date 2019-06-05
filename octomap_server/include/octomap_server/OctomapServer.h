@@ -244,10 +244,8 @@ protected:
   }
 
   void reconfigureCallback(octomap_server::OctomapServerConfig& config, uint32_t level);
-  void publishBinaryOctoMap(const ros::Time& rostime = ros::Time::now()) const;
   void onNewBinaryMapSubscription(const ros::SingleSubscriberPublisher& pub);
   void publishBinaryOctoMapUpdate(const ros::Time& rostime = ros::Time::now()) const;
-  void publishFullOctoMap(const ros::Time& rostime = ros::Time::now()) const;
   void onNewFullMapSubscription(const ros::SingleSubscriberPublisher& pub);
   void publishFullOctoMapUpdate(const ros::Time& rostime = ros::Time::now()) const;
   virtual void publishAll(const ros::Time& rostime = ros::Time::now());

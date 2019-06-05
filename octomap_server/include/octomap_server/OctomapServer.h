@@ -245,8 +245,11 @@ protected:
 
   void reconfigureCallback(octomap_server::OctomapServerConfig& config, uint32_t level);
   void publishBinaryOctoMap(const ros::Time& rostime = ros::Time::now()) const;
+  void onNewBinaryMapSubscription(const ros::SingleSubscriberPublisher& pub);
+  void publishBinaryOctoMapUpdate(const ros::Time& rostime = ros::Time::now()) const;
   void publishFullOctoMap(const ros::Time& rostime = ros::Time::now()) const;
-  void publishOctoMapUpdate(const ros::Time& rostime = ros::Time::now()) const;
+  void onNewFullMapSubscription(const ros::SingleSubscriberPublisher& pub);
+  void publishFullOctoMapUpdate(const ros::Time& rostime = ros::Time::now()) const;
   virtual void publishAll(const ros::Time& rostime = ros::Time::now());
 
   /**
@@ -328,7 +331,7 @@ protected:
 
   static std_msgs::ColorRGBA heightMapColor(double h);
   ros::NodeHandle m_nh;
-  ros::Publisher  m_markerPub, m_binaryMapPub, m_fullMapPub, m_mapUpdatePub, m_pointCloudPub, m_collisionObjectPub, m_mapPub, m_cmapPub, m_fmapPub, m_fmarkerPub;
+  ros::Publisher  m_markerPub, m_binaryMapPub, m_binaryMapUpdatePub, m_fullMapPub, m_fullMapUpdatePub, m_pointCloudPub, m_collisionObjectPub, m_mapPub, m_cmapPub, m_fmapPub, m_fmarkerPub;
   std::vector<boost::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2> > > m_pointCloudSubs;
   std::vector<boost::shared_ptr<tf::MessageFilter<sensor_msgs::PointCloud2> > > m_tfPointCloudSubs;
   std::vector<boost::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::PointCloud2, sensor_msgs::PointCloud2> > > m_sync2s;
@@ -355,6 +358,8 @@ protected:
 
   bool m_latchedTopics;
   bool m_publishFreeSpace;
+  bool m_newFullSub;
+  bool m_newBinarySub;
   double m_publish3DMapPeriod;
   ros::Time m_publish3DMapLastTime;
   double m_publish3DMapUpdatePeriod;

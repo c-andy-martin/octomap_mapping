@@ -9,6 +9,7 @@
 #include <octomap/OccupancyOcTreeBase.h>
 
 namespace octomap_server {
+using NodeChangeNotification = std::function<void(const octomap::OcTreeKey&, unsigned int)>;
 
 // node definition
 class OcTreeNodeStampedWithExpiry : public octomap::OcTreeNode
@@ -120,7 +121,7 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
     // Remove all expired nodes.
     // This also calculates and stores any missing expiration times in the tree.
     // This function should be called periodically.
-    void expireNodes();
+    void expireNodes(NodeChangeNotification change_notification = NodeChangeNotification());
 
     // Calculate min/max octree keys based on given parameters
     void calculateBounds(double xy_distance,
@@ -131,7 +132,7 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
                          octomap::OcTreeKey* max_key);
 
     // Delete nodes that are out of bounds
-    void outOfBounds(double xy_distance, double z_height, double z_depth, const octomap::point3d& base_position);
+    void outOfBounds(double xy_distance, double z_height, double z_depth, const octomap::point3d& base_position, NodeChangeNotification change_notification = NodeChangeNotification());
 
     virtual OcTreeNodeStampedWithExpiry* updateNode(const octomap::OcTreeKey& key, float log_odds_update, bool lazy_eval = false);
     virtual OcTreeNodeStampedWithExpiry* updateNode(const octomap::OcTreeKey& key, bool occupied, bool lazy_eval = false) {
@@ -182,7 +183,10 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
 
     // Return true if this node has expired.
     // Assume node is valid.
-    bool expireNodeRecurs(OcTreeNodeStampedWithExpiry* node);
+    bool expireNodeRecurs(OcTreeNodeStampedWithExpiry* node,
+                          const octomap::OcTreeKey& key,
+                          int depth,
+                          NodeChangeNotification change_notification = NodeChangeNotification());
 
     // Delete nodes recursively that are not inside the given min/max keys.
     // Assume node is valid.
@@ -190,7 +194,8 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
                            const octomap::OcTreeKey& key,
                            int depth,
                            const octomap::OcTreeKey& minKey,
-                           const octomap::OcTreeKey& maxKey);
+                           const octomap::OcTreeKey& maxKey,
+                           NodeChangeNotification change_notification = NodeChangeNotification());
 
     /**
      * Static member object which ensures that this OcTree's prototype

@@ -247,7 +247,7 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   m_markerPub = m_nh.advertise<visualization_msgs::MarkerArray>("occupied_cells_vis_array", 1, m_latchedTopics);
   m_binaryMapPub = m_nh.advertise<Octomap>("octomap_binary", 1, m_latchedTopics);
   m_fullMapPub = m_nh.advertise<Octomap>("octomap_full", 1, m_latchedTopics);
-  m_mapUpdatePub = m_nh.advertise<Octomap>("octomap_update", 1, m_latchedTopics);
+  m_mapUpdatePub = m_nh.advertise<octomap_msgs::OctomapUpdate>("octomap_update", 1, m_latchedTopics);
   m_pointCloudPub = m_nh.advertise<sensor_msgs::PointCloud2>("octomap_point_cloud_centers", 1, m_latchedTopics);
   m_mapPub = m_nh.advertise<nav_msgs::OccupancyGrid>("projected_map", 5, m_latchedTopics);
   m_fmarkerPub = m_nh.advertise<visualization_msgs::MarkerArray>("free_cells_vis_array", 1, m_latchedTopics);
@@ -762,8 +762,12 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   }
   // now update all cells per the accumulated update
   // JAT: Possible spot to gather update information.  For now, just worry about updating in this case
-  for (SensorUpdateKeyMap::iterator it = update_cells.begin(), end=update_cells.end(); it!= end; it++) {
-    m_octree->updateNode(it->key, it->value);
+  {
+    boost::mutex::scoped_lock lock(m_octree_lock_);
+    for (SensorUpdateKeyMap::iterator it = update_cells.begin(), end=update_cells.end(); it!= end; it++) {
+      m_octree->updateNode(it->key, it->value);
+      touchKey(it->key);
+    }
   }
 
   // TODO: eval lazy+updateInner vs. proper insertion
@@ -806,7 +810,7 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   if (!pruned && m_expirePeriod > 0.0) {
     if (now >= m_expireLastTime + ros::Duration(m_expirePeriod)) {
       m_expireLastTime = now;
-      m_octree->expireNodes();
+      m_octree->expireNodes(boost::bind(&OctomapServer::touchKeyAtDepth, this, _1, _2));
     }
   }
 
@@ -831,7 +835,8 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
       ss << " from (" << origin.x() << ", " << origin.y() << ", " << origin.z() << ")";
       ROS_INFO_STREAM(ss.str());
       octomap::point3d base_position(origin.x(), origin.y(), origin.z());
-      m_octree->outOfBounds(m_base2DDistanceLimit, m_baseHeightLimit, m_baseDepthLimit, base_position);
+      m_octree->outOfBounds(m_base2DDistanceLimit, m_baseHeightLimit, m_baseDepthLimit, base_position,
+          boost::bind(&OctomapServer::touchKeyAtDepth, this, _1, _2));
     }
   }
 
@@ -1742,6 +1747,19 @@ void OctomapServer::adjustMapData(nav_msgs::OccupancyGrid& map, const nav_msgs::
 
 }
 
+
+void OctomapServer::touchKeyAtDepth(const OcTreeKey& key, unsigned int depth /* = 0 */)
+{
+  for(auto bounds_tree : m_octree_deltaBB_)
+  {
+    bounds_tree.second->setNodeValueAtDepth(key, depth, bounds_tree.second->getClampingThresMax());
+  }
+}
+// for convenience
+void OctomapServer::touchKey(const OcTreeKey& key)
+{
+  touchKeyAtDepth(key);
+}
 
 std_msgs::ColorRGBA OctomapServer::heightMapColor(double h) {
 

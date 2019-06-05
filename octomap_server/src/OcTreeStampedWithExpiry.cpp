@@ -14,8 +14,9 @@ OcTreeStampedWithExpiry::OcTreeStampedWithExpiry(double resolution)
   ocTreeStampedWithExpiryMemberInit.ensureLinking();
 }
 
-void OcTreeStampedWithExpiry::expireNodes()
+void OcTreeStampedWithExpiry::expireNodes(NodeChangeNotification change_notification /* = NodeChangeNotification() */)
 {
+  octomap::OcTreeKey rootKey(this->tree_max_val, this->tree_max_val, this->tree_max_val);
   last_expire_time = ros::Time::now().sec;
 
   // pre-compute a_coeff in terms of log-odds instead of number of observations
@@ -26,11 +27,15 @@ void OcTreeStampedWithExpiry::expireNodes()
   {
     ROS_INFO("prior to expiry, root expiry was: %ld.", root->getExpiry());
     expire_count = 0;
-    if (expireNodeRecurs(root))
+    if (expireNodeRecurs(root, rootKey, 0,change_notification))
     {
       // The whole tree expired. This is odd but possible if no sensor data
       // has been received. It is odd enough to log this.
       ROS_WARN("Entire octree expired!");
+      if(change_notification)
+      {
+        change_notification(rootKey, 0);
+      }
       delete root;
       root = NULL;
       expire_count++;
@@ -43,8 +48,12 @@ void OcTreeStampedWithExpiry::expireNodes()
   }
 }
 
-bool OcTreeStampedWithExpiry::expireNodeRecurs(OcTreeNodeStampedWithExpiry* node)
+bool OcTreeStampedWithExpiry::expireNodeRecurs(OcTreeNodeStampedWithExpiry* node,
+                                               const octomap::OcTreeKey& key,
+                                               int depth,
+                                               NodeChangeNotification change_notification /* = NodeChangeNotification() */)
 {
+  octomap::key_type center_offset_key = this->tree_max_val >> (depth + 1);
   // We can prune our search tree using the stored expiry.
   // If we encounter an expiry of zero, that indicates a deferred calculation.
   // Calculate the expiration of such nodes as they are encountered, being
@@ -68,7 +77,9 @@ bool OcTreeStampedWithExpiry::expireNodeRecurs(OcTreeNodeStampedWithExpiry* node
         {
           if (nodeChildExists(node, i))
           {
-            if (expireNodeRecurs(getNodeChild(node, i)))
+            octomap::OcTreeKey child_key;
+            computeChildKey(i, center_offset_key, key, child_key);
+            if (expireNodeRecurs(getNodeChild(node, i), child_key, depth+1, change_notification))
             {
               // Delete the child node
               deleteNodeChild(node, i);
@@ -152,7 +163,8 @@ void OcTreeStampedWithExpiry::calculateBounds(double xy_distance,
 void OcTreeStampedWithExpiry::outOfBounds(double xy_distance,
                                           double z_height,
                                           double z_depth,
-                                          const octomap::point3d& base_position)
+                                          const octomap::point3d& base_position,
+                                          NodeChangeNotification change_notification /* = NodeChangeNotification() */)
 {
   octomap::OcTreeKey rootKey(this->tree_max_val, this->tree_max_val, this->tree_max_val);
   octomap::OcTreeKey minKey;
@@ -162,12 +174,16 @@ void OcTreeStampedWithExpiry::outOfBounds(double xy_distance,
                     "), max key (" << maxKey[0] << ", " << maxKey[1] << ", " << maxKey[2] << ")");
   if (root != NULL)
   {
-    if (outOfBoundsRecurs(root, rootKey, 0, minKey, maxKey))
+    if (outOfBoundsRecurs(root, rootKey, 0, minKey, maxKey, change_notification))
     {
       // The whole tree is out-of-bounds. This is odd but possible if no sensor data
       // has been received yet the base moved. It is odd enough to log this.
       ROS_WARN("Entire octree out-of-bounds!");
       delete root;
+      if(change_notification)
+      {
+        change_notification(rootKey, 0);
+      }
       root = NULL;
     }
   }
@@ -177,7 +193,8 @@ bool OcTreeStampedWithExpiry::outOfBoundsRecurs(OcTreeNodeStampedWithExpiry* nod
                                                 const octomap::OcTreeKey& key,
                                                 int depth,
                                                 const octomap::OcTreeKey& minKey,
-                                                const octomap::OcTreeKey& maxKey)
+                                                const octomap::OcTreeKey& maxKey,
+                                                NodeChangeNotification change_notification /* = NodeChangeNotification() */)
 {
   if (nodeHasChildren(node))
   {
@@ -203,6 +220,10 @@ bool OcTreeStampedWithExpiry::outOfBoundsRecurs(OcTreeNodeStampedWithExpiry* nod
           if (this->outOfBoundsRecurs(this->getNodeChild(node, i), child_key, depth + 1, minKey, maxKey))
           {
             // Delete the child node
+            if(change_notification)
+            {
+              change_notification(child_key, depth+1);
+            }
             deleteNodeChild(node, i);
             deleted = true;
           }

@@ -46,7 +46,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_nh_private(private_nh_),
   m_reconfigureServer(m_config_mutex, private_nh_),
   m_octree(NULL),
-  m_octree_delta_(NULL),
+  m_octree_deltaBB_(NULL),
   m_maxRange(-1.0),
   m_worldFrameId("/map"), m_baseFrameId("base_footprint"),
   m_useHeightMap(true),
@@ -193,12 +193,12 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_octree->setClampingThresMin(thresMin);
   m_octree->setClampingThresMax(thresMax);
   m_octree->enableChangeDetection(true);
-  // Delta octmap will have identical properties
-  m_octree_delta_ = new OcTreeT(m_res);
-  m_octree_delta_->setProbHit(probHit);
-  m_octree_delta_->setProbMiss(probMiss);
-  m_octree_delta_->setClampingThresMin(thresMin);
-  m_octree_delta_->setClampingThresMax(thresMax);
+
+  m_octree_deltaBB_ = new OcTreeT(m_res);
+  m_octree_deltaBB_->setProbHit(probHit);
+  m_octree_deltaBB_->setProbMiss(probMiss);
+  m_octree_deltaBB_->setClampingThresMin(thresMin);
+  m_octree_deltaBB_->setClampingThresMax(thresMax);
 
   m_treeDepth = m_octree->getTreeDepth();
   m_maxTreeDepth = m_treeDepth;
@@ -330,9 +330,9 @@ OctomapServer::~OctomapServer(){
     m_octree = NULL;
   }
 
-  if (m_octree_delta_){
-    delete m_octree_delta_;
-    m_octree_delta_ = NULL;
+  if (m_octree_deltaBB_){
+    delete m_octree_deltaBB_;
+    m_octree_deltaBB_ = NULL;
   }
 
 }
@@ -757,12 +757,9 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   }
   // now update all cells per the accumulated update
   // JAT: Possible spot to gather update information.  For now, just worry about updating in this case
-  {
-    boost::mutex::scoped_lock lock(m_octree_lock_);
-    for (SensorUpdateKeyMap::iterator it = update_cells.begin(), end=update_cells.end(); it!= end; it++) {
-      m_octree->updateNode(it->key, it->value);
-      touchKey(it->key);
-    }
+  for (SensorUpdateKeyMap::iterator it = update_cells.begin(), end=update_cells.end(); it!= end; it++) {
+    m_octree->updateNode(it->key, it->value);
+    touchKey(it->key);
   }
 
   // TODO: eval lazy+updateInner vs. proper insertion
@@ -1162,7 +1159,6 @@ void OctomapServer::publishAll(const ros::Time& rostime){
       else
         freeNodesVis.markers[i].action = visualization_msgs::Marker::DELETE;
     }
-
     m_fmarkerPub.publish(freeNodesVis);
   }
 
@@ -1188,15 +1184,7 @@ void OctomapServer::publishAll(const ros::Time& rostime){
 
   if (publishMapUpdate)
   {
-    octomap::KeyBoolMap::const_iterator it;
-    for (it=m_octree->changedKeysBegin(); it!=m_octree->changedKeysEnd(); it++)
-    {
-      if(m_octree->search(it->first, m_octree->getTreeDepth()))
-        m_octree_delta_->setNodeValue(it->first, m_octree->search(it->first, m_octree->getTreeDepth())->getValue());
-    }
     publishOctoMapUpdate(rostime);
-    m_octree_delta_->clear();
-    m_octree->resetChangeDetection();
   }
 
 
@@ -1317,9 +1305,13 @@ void OctomapServer::publishFullOctoMap(const ros::Time& rostime) const{
   Octomap map;
   map.header.frame_id = m_worldFrameId;
   map.header.stamp = rostime;
+  ROS_INFO("FULL MAP CHECK");
 
   if (octomap_msgs::fullMapToMsg(*m_octree, map))
+  {
     m_fullMapPub.publish(map);
+    ROS_INFO("FULL MAP SENT");
+  }
   else
     ROS_ERROR("Error serializing OctoMap");
 
@@ -1327,15 +1319,31 @@ void OctomapServer::publishFullOctoMap(const ros::Time& rostime) const{
 
 void OctomapServer::publishOctoMapUpdate(const ros::Time& rostime) const{
 
-  Octomap map_delta;
-  map_delta.header.frame_id = m_worldFrameId;
-  map_delta.header.stamp = rostime;
+  ROS_INFO("FULL UPDATE CHECK1");
+  octomap_msgs::OctomapUpdate map_msg;
+  OcTreeT delta_map(m_res);
 
+  // Set up header info
+  map_msg.header.frame_id = m_worldFrameId;
+  map_msg.header.stamp = rostime;
+  map_msg.octomap_bounds.header.frame_id = m_worldFrameId;
+  map_msg.octomap_bounds.header.stamp = rostime;
+  map_msg.octomap_update.header.frame_id = m_worldFrameId;
+  map_msg.octomap_update.header.stamp = rostime;
 
-  if (octomap_msgs::fullMapToMsg(*m_octree_delta_, map_delta))
-    m_mapUpdatePub.publish(map_delta);
+  ROS_INFO("FULL UPDATE CHECK2");
+  delta_map.setTreeValues(m_octree, m_octree_deltaBB_);
+
+  if(   octomap_msgs::fullMapToMsg(*m_octree_deltaBB_, map_msg.octomap_bounds)
+     && octomap_msgs::fullMapToMsg(delta_map, map_msg.octomap_update))
+  {
+    m_mapUpdatePub.publish(map_msg);
+    ROS_INFO("FULL UPDATE SENT");
+  }
   else
+  {
     ROS_ERROR("Error serializing OctoMap Update");
+  }
 
 }
 
@@ -1741,17 +1749,13 @@ void OctomapServer::adjustMapData(nav_msgs::OccupancyGrid& map, const nav_msgs::
 //    }
 
   }
-
 }
-
 
 void OctomapServer::touchKeyAtDepth(const OcTreeKey& key, unsigned int depth /* = 0 */)
 {
-  for(auto bounds_tree : m_octree_deltaBB_)
-  {
-    bounds_tree.second->setNodeValueAtDepth(key, depth, bounds_tree.second->getClampingThresMax());
-  }
+  m_octree_deltaBB_->setNodeValueAtDepth(key, depth, m_octree->getClampingThresMax());
 }
+
 // for convenience
 void OctomapServer::touchKey(const OcTreeKey& key)
 {

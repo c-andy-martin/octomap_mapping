@@ -64,6 +64,7 @@
 #include <message_filters/subscriber.h>
 #include <message_filters/time_synchronizer.h>
 #include <octomap_msgs/Octomap.h>
+#include <octomap_msgs/OctomapUpdate.h>
 #include <octomap_msgs/GetOctomap.h>
 #include <octomap_msgs/BoundingBoxQuery.h>
 #include <octomap_msgs/conversions.h>
@@ -322,6 +323,8 @@ protected:
                 || oldMapInfo.origin.position.y != newMapInfo.origin.position.y);
   }
 
+  void touchKeyAtDepth(const octomap::OcTreeKey& key, unsigned int depth = 0);
+  void touchKey(const octomap::OcTreeKey& key);
   static std_msgs::ColorRGBA heightMapColor(double h);
   ros::NodeHandle m_nh;
   ros::NodeHandle m_nh_private;

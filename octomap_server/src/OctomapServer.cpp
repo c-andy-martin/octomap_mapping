@@ -61,6 +61,8 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_publish3DMapLastTime(ros::Time::now()),
   m_publish2DLastTime(ros::Time::now()),
   m_publish3DMapUpdateLastTime(ros::Time::now()),
+  m_newFullSub(false),
+  m_newBinarySub(false),
   m_res(0.05),
   m_treeDepth(0),
   m_maxTreeDepth(0),
@@ -244,9 +246,10 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
     ROS_INFO("Publishing non-latched (topics are only prepared as needed, will only be re-published on map change");
 
   m_markerPub = m_nh.advertise<visualization_msgs::MarkerArray>("occupied_cells_vis_array", 1, m_latchedTopics);
-  m_binaryMapPub = m_nh.advertise<Octomap>("octomap_binary", 1, m_latchedTopics);
-  m_fullMapPub = m_nh.advertise<Octomap>("octomap_full", 1, m_latchedTopics);
-  m_mapUpdatePub = m_nh.advertise<octomap_msgs::OctomapUpdate>("octomap_update", 1, m_latchedTopics);
+  m_binaryMapPub = m_nh.advertise<Octomap>("octomap_binary", 1, boost::bind(&OctomapServer::onNewBinaryMapSubscription, this, _1));
+  m_binaryMapUpdatePub = m_nh.advertise<octomap_msgs::OctomapUpdate>("octomap_binary_updates", 1, m_latchedTopics);
+  m_fullMapPub = m_nh.advertise<Octomap>("octomap_full", 1, boost::bind(&OctomapServer::onNewFullMapSubscription, this, _1));
+  m_fullMapUpdatePub = m_nh.advertise<octomap_msgs::OctomapUpdate>("octomap_full_updates", 1, m_latchedTopics);
   m_pointCloudPub = m_nh.advertise<sensor_msgs::PointCloud2>("octomap_point_cloud_centers", 1, m_latchedTopics);
   m_mapPub = m_nh.advertise<nav_msgs::OccupancyGrid>("projected_map", 5, m_latchedTopics);
   m_fmarkerPub = m_nh.advertise<visualization_msgs::MarkerArray>("free_cells_vis_array", 1, m_latchedTopics);
@@ -843,7 +846,12 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
 #endif
 }
 
-
+void OctomapServer::onNewBinaryMapSubscription(const ros::SingleSubscriberPublisher& pub)
+{
+  m_newBinarySub = true;
+  publishAll();
+  m_newBinarySub = false;
+}
 
 void OctomapServer::publishAll(const ros::Time& rostime){
 
@@ -902,8 +910,9 @@ void OctomapServer::publishAll(const ros::Time& rostime){
   bool publishMarkerArray = (m_latchedTopics || m_markerPub.getNumSubscribers() > 0);
   bool publishPointCloud = (m_latchedTopics || m_pointCloudPub.getNumSubscribers() > 0);
   bool publishBinaryMap = (m_latchedTopics || m_binaryMapPub.getNumSubscribers() > 0);
+  bool publishBinaryMapUpdate = (m_latchedTopics || m_binaryMapUpdatePub.getNumSubscribers() > 0);
   bool publishFullMap = (m_latchedTopics || m_fullMapPub.getNumSubscribers() > 0);
-  bool publishMapUpdate = (m_latchedTopics || m_mapUpdatePub.getNumSubscribers() > 0);
+  bool publishFullMapUpdate = (m_latchedTopics || m_fullMapUpdatePub.getNumSubscribers() > 0);
   m_publish2DMap = (m_latchedTopics || m_mapPub.getNumSubscribers() > 0);
 
   // Update above based on publish period booleans set above.
@@ -917,7 +926,8 @@ void OctomapServer::publishAll(const ros::Time& rostime){
   }
   if (!publish_updates)
   {
-    publishMapUpdate = false;
+    publishFullMapUpdate = false;
+    publishBinaryMapUpdate = false;
   }
   if (!publish_2d)
   {
@@ -1177,20 +1187,23 @@ void OctomapServer::publishAll(const ros::Time& rostime){
     publishBinaryOctoMap(rostime);
   }
 
-  if (publishFullMap)
+//  if (publishFullMap)
+//  {
+//    publishFullOctoMap(rostime);
+//  }
+
+  if (publishFullMapUpdate)
   {
-    publishFullOctoMap(rostime);
+    publishFullOctoMapUpdate(rostime);
   }
 
-  if (publishMapUpdate)
+  if (publishBinaryMapUpdate)
   {
-    publishOctoMapUpdate(rostime);
+    //publishBinaryOctoMapUpdate(rostime);
   }
-
 
   double total_elapsed = (ros::WallTime::now() - startTime).toSec();
   ROS_DEBUG("Map publishing in OctomapServer took %f sec", total_elapsed);
-
 }
 
 
@@ -1300,24 +1313,32 @@ void OctomapServer::publishBinaryOctoMap(const ros::Time& rostime) const{
     ROS_ERROR("Error serializing OctoMap");
 }
 
+void OctomapServer::onNewFullMapSubscription(const ros::SingleSubscriberPublisher& pub)
+{
+  publishAll();
+  Octomap map;
+  map.header.frame_id = m_worldFrameId;
+  map.header.stamp = ros::Time::now();
+
+  if (octomap_msgs::fullMapToMsg(*m_octree, map))
+    pub.publish(map);
+  else
+    ROS_ERROR("Error serializing OctoMap");
+}
+
 void OctomapServer::publishFullOctoMap(const ros::Time& rostime) const{
 
   Octomap map;
   map.header.frame_id = m_worldFrameId;
   map.header.stamp = rostime;
-  ROS_INFO("FULL MAP CHECK");
 
   if (octomap_msgs::fullMapToMsg(*m_octree, map))
-  {
     m_fullMapPub.publish(map);
-    ROS_INFO("FULL MAP SENT");
-  }
   else
     ROS_ERROR("Error serializing OctoMap");
-
 }
 
-void OctomapServer::publishOctoMapUpdate(const ros::Time& rostime) const{
+void OctomapServer::publishFullOctoMapUpdate(const ros::Time& rostime) const{
 
   ROS_INFO("FULL UPDATE CHECK1");
   octomap_msgs::OctomapUpdate map_msg;
@@ -1337,7 +1358,7 @@ void OctomapServer::publishOctoMapUpdate(const ros::Time& rostime) const{
   if(   octomap_msgs::fullMapToMsg(*m_octree_deltaBB_, map_msg.octomap_bounds)
      && octomap_msgs::fullMapToMsg(delta_map, map_msg.octomap_update))
   {
-    m_mapUpdatePub.publish(map_msg);
+    m_fullMapUpdatePub.publish(map_msg);
     ROS_INFO("FULL UPDATE SENT");
   }
   else

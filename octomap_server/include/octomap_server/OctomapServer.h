@@ -346,7 +346,7 @@ protected:
   dynamic_reconfigure::Server<OctomapServerConfig> m_reconfigureServer;
 
   OcTreeT* m_octree;
-  OcTreeT* m_octree_deltaBB_;
+  octomap::OcTree* m_octree_deltaBB_;
   octomap::KeyRay m_keyRay;  // temp storage for ray casting
   octomap::OcTreeKey m_updateBBXMin;
   octomap::OcTreeKey m_updateBBXMax;

@@ -196,7 +196,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_octree->setClampingThresMax(thresMax);
   m_octree->enableChangeDetection(true);
 
-  m_octree_deltaBB_ = new OcTreeT(m_res);
+  m_octree_deltaBB_ = new octomap::OcTree(m_res);
   m_octree_deltaBB_->setProbHit(probHit);
   m_octree_deltaBB_->setProbMiss(probMiss);
   m_octree_deltaBB_->setClampingThresMin(thresMin);

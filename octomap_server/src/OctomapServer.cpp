@@ -314,6 +314,7 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   m_octomapBinaryService = m_nh.advertiseService("octomap_binary", &OctomapServer::octomapBinarySrv, this);
   m_octomapFullService = m_nh.advertiseService("octomap_full", &OctomapServer::octomapFullSrv, this);
   m_clearBBXService = private_nh.advertiseService("clear_bbx", &OctomapServer::clearBBXSrv, this);
+  m_eraseBBXService = private_nh.advertiseService("erase_bbx", &OctomapServer::eraseBBXSrv, this);
   m_resetService = private_nh.advertiseService("reset", &OctomapServer::resetSrv, this);
 
   dynamic_reconfigure::Server<OctomapServerConfig>::CallbackType f;
@@ -1235,6 +1236,18 @@ bool OctomapServer::clearBBXSrv(BBXSrv::Request& req, BBXSrv::Response& resp){
   }
   // TODO: eval which is faster (setLogOdds+updateInner or updateNode)
   m_octree->updateInnerOccupancy();
+
+  publishAll(ros::Time::now());
+
+  return true;
+}
+
+bool OctomapServer::eraseBBXSrv(BBXSrv::Request& req, BBXSrv::Response& resp){
+  point3d min = pointMsgToOctomap(req.min);
+  point3d max = pointMsgToOctomap(req.max);
+
+  m_octree->deleteAABB(min, max, false,
+                       std::bind(&OctomapServer::touchKeyAtDepth, this, std::placeholders::_3, std::placeholders::_4));
 
   publishAll(ros::Time::now());
 

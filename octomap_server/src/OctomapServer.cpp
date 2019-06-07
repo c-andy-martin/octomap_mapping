@@ -831,7 +831,7 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
       ROS_INFO_STREAM(ss.str());
       octomap::point3d base_position(origin.x(), origin.y(), origin.z());
       m_octree->outOfBounds(m_base2DDistanceLimit, m_baseHeightLimit, m_baseDepthLimit, base_position,
-          boost::bind(&OctomapServer::touchKeyAtDepth, this, _1, _2));
+          boost::bind(&OctomapServer::touchKeyAtDepth, this, _3, _4));
     }
   }
 
@@ -1351,7 +1351,7 @@ void OctomapServer::publishFullOctoMapUpdate(const ros::Time& rostime) const{
 
   delta_map.setTreeValues(m_octree, m_octree_deltaBB_);
 
-  if(   octomap_msgs::fullMapToMsg(*m_octree_deltaBB_, map_msg.octomap_bounds)
+  if(   octomap_msgs::binaryMapToMsg(*m_octree_deltaBB_, map_msg.octomap_bounds)
      && octomap_msgs::fullMapToMsg(delta_map, map_msg.octomap_update))
   {
     m_fullMapUpdatePub.publish(map_msg);
@@ -1769,7 +1769,7 @@ void OctomapServer::adjustMapData(nav_msgs::OccupancyGrid& map, const nav_msgs::
 
 void OctomapServer::touchKeyAtDepth(const OcTreeKey& key, unsigned int depth /* = 0 */)
 {
-  m_octree_deltaBB_->setNodeValueAtDepth(key, depth, m_octree->getClampingThresMax());
+  m_octree_deltaBB_->setNodeValueAtDepth(key, depth, m_octree->getClampingThresMaxLog());
 }
 
 // for convenience

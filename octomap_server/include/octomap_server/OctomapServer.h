@@ -245,9 +245,13 @@ protected:
 
   void reconfigureCallback(octomap_server::OctomapServerConfig& config, uint32_t level);
   void onNewBinaryMapSubscription(const ros::SingleSubscriberPublisher& pub);
-  void publishBinaryOctoMapUpdate(const ros::Time& rostime = ros::Time::now()) const;
+  void onNewBinaryMapUpdateSubscription(const ros::SingleSubscriberPublisher& pub);
+  void publishBinaryOctoMapUpdate(const ros::Time& rostime = ros::Time::now(),
+      const ros::SingleSubscriberPublisher* pub =  nullptr) const;
   void onNewFullMapSubscription(const ros::SingleSubscriberPublisher& pub);
-  void publishFullOctoMapUpdate(const ros::Time& rostime = ros::Time::now()) const;
+  void onNewFullMapUpdateSubscription(const ros::SingleSubscriberPublisher& pub);
+  void publishFullOctoMapUpdate(const ros::Time& rostime = ros::Time::now(),
+      const ros::SingleSubscriberPublisher* pub = nullptr) const;
   virtual void publishAll(const ros::Time& rostime = ros::Time::now());
 
   /**

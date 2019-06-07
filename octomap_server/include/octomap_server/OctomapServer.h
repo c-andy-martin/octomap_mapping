@@ -324,7 +324,7 @@ protected:
                 || oldMapInfo.origin.position.y != newMapInfo.origin.position.y);
   }
 
-  void touchKeyAtDepth(const octomap::OcTreeKey& key, unsigned int depth = 0);
+  void touchKeyAtDepth(const octomap::OcTreeKey& key, unsigned int depth = std::numeric_limits<unsigned int>::max());
   void touchKey(const octomap::OcTreeKey& key);
 
   static std_msgs::ColorRGBA heightMapColor(double h);

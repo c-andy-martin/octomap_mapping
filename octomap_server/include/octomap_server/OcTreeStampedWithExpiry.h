@@ -132,7 +132,7 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
                          octomap::OcTreeKey* max_key);
 
     // Delete nodes that are out of bounds
-    void outOfBounds(double xy_distance, double z_height, double z_depth, const octomap::point3d& base_position, NodeChangeNotification change_notification = NodeChangeNotification());
+    void outOfBounds(double xy_distance, double z_height, double z_depth, const octomap::point3d& base_position, DeletionCallback change_notification = DeletionCallback());
 
     virtual OcTreeNodeStampedWithExpiry* updateNode(const octomap::OcTreeKey& key, float log_odds_update, bool lazy_eval = false);
     virtual OcTreeNodeStampedWithExpiry* updateNode(const octomap::OcTreeKey& key, bool occupied, bool lazy_eval = false) {
@@ -187,15 +187,6 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
                           const octomap::OcTreeKey& key,
                           int depth,
                           NodeChangeNotification change_notification = NodeChangeNotification());
-
-    // Delete nodes recursively that are not inside the given min/max keys.
-    // Assume node is valid.
-    bool outOfBoundsRecurs(OcTreeNodeStampedWithExpiry* node,
-                           const octomap::OcTreeKey& key,
-                           int depth,
-                           const octomap::OcTreeKey& minKey,
-                           const octomap::OcTreeKey& maxKey,
-                           NodeChangeNotification change_notification = NodeChangeNotification());
 
     /**
      * Static member object which ensures that this OcTree's prototype

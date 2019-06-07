@@ -164,7 +164,7 @@ void OcTreeStampedWithExpiry::outOfBounds(double xy_distance,
                                           double z_height,
                                           double z_depth,
                                           const octomap::point3d& base_position,
-                                          NodeChangeNotification change_notification /* = NodeChangeNotification() */)
+                                          DeletionCallback change_notification /* = NodeChangeNotification() */)
 {
   octomap::OcTreeKey rootKey(this->tree_max_val, this->tree_max_val, this->tree_max_val);
   octomap::OcTreeKey minKey;
@@ -174,96 +174,20 @@ void OcTreeStampedWithExpiry::outOfBounds(double xy_distance,
                     "), max key (" << maxKey[0] << ", " << maxKey[1] << ", " << maxKey[2] << ")");
   if (root != NULL)
   {
-    if (outOfBoundsRecurs(root, rootKey, 0, minKey, maxKey, change_notification))
-    {
-      // The whole tree is out-of-bounds. This is odd but possible if no sensor data
-      // has been received yet the base moved. It is odd enough to log this.
-      ROS_WARN("Entire octree out-of-bounds!");
-      delete root;
-      if(change_notification)
-      {
-        change_notification(rootKey, 0);
-      }
-      root = NULL;
-    }
+    deleteAABB(minKey, maxKey, true, change_notification);
+//    if (outOfBoundsRecurs(root, rootKey, 0, minKey, maxKey, change_notification))
+//    {
+//      // The whole tree is out-of-bounds. This is odd but possible if no sensor data
+//      // has been received yet the base moved. It is odd enough to log this.
+//      ROS_WARN("Entire octree out-of-bounds!");
+//      delete root;
+//      if(change_notification)
+//      {
+//        change_notification(rootKey, 0);
+//      }
+//      root = NULL;
+//    }
   }
-}
-
-bool OcTreeStampedWithExpiry::outOfBoundsRecurs(OcTreeNodeStampedWithExpiry* node,
-                                                const octomap::OcTreeKey& key,
-                                                int depth,
-                                                const octomap::OcTreeKey& minKey,
-                                                const octomap::OcTreeKey& maxKey,
-                                                NodeChangeNotification change_notification /* = NodeChangeNotification() */)
-{
-  if (nodeHasChildren(node))
-  {
-    bool deleted = false;
-    octomap::key_type center_offset_key = this->tree_max_val >> (depth + 1);
-    for (unsigned int i=0; i<8; i++)
-    {
-      if (this->nodeChildExists(node, i))
-      {
-        octomap::OcTreeKey child_key;
-        computeChildKey(i, center_offset_key, key, child_key);
-
-        if ((minKey[0] <= (child_key[0] - center_offset_key)) && (maxKey[0] >= (child_key[0] + center_offset_key))
-            && (minKey[1] <= (child_key[1] - center_offset_key)) && (maxKey[1] >= (child_key[1] + center_offset_key))
-            && (minKey[2] <= (child_key[2] - center_offset_key)) && (maxKey[2] >= (child_key[2] + center_offset_key)))
-        {
-          // Child key is entirely within the bounding box. There is no need to
-          // go deeper for this child.
-        }
-        else
-        {
-          // Child key is at least somewhat outside the bounding box. Recurse.
-          if (this->outOfBoundsRecurs(this->getNodeChild(node, i), child_key, depth + 1, minKey, maxKey))
-          {
-            // Delete the child node
-            if(change_notification)
-            {
-              change_notification(child_key, depth+1);
-            }
-            deleteNodeChild(node, i);
-            deleted = true;
-          }
-        }
-      }
-    }
-    // If we have no more children left, this inner node can be removed
-    if (!nodeHasChildren(node))
-    {
-      // Curiously, deleteNodeChild does not clean up the dynamic array
-      // for the children pointers when the child count drops to zero.
-      // pruneNode does this, but is not what we want (we want to drop the
-      // expired data, not merge it up the tree!). So prevent leaking
-      // memory be ensuring this inner node deletes the children pointer
-      // storage before the caller deletes us!
-      node->deleteNodeChildren();
-      return true;
-    }
-    if (deleted)
-    {
-      // Update the inner node's expiry to track the min of all children
-      node->updateOccupancyChildren();
-    }
-  }
-  else
-  {
-    octomap::key_type key_size = this->tree_max_val >> depth;
-    if ((minKey[0] <= (key[0] + key_size)) && (maxKey[0] >= (key[0] - key_size))
-        && (minKey[1] <= (key[1] + key_size)) && (maxKey[1] >= (key[1] - key_size))
-        && (minKey[2] <= (key[2] + key_size)) && (maxKey[2] >= (key[2] - key_size)))
-    {
-      // Some part of the leaf node is inside the bounds
-    }
-    else
-    {
-      // Every part of the leaf node is outside the bounds
-      return true;
-    }
-  }
-  return false;
 }
 
 OcTreeNodeStampedWithExpiry* OcTreeStampedWithExpiry::updateNode(const octomap::OcTreeKey& key, float log_odds_update, bool lazy_eval)

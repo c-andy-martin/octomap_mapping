@@ -23,7 +23,7 @@ find_package(catkin REQUIRED COMPONENTS ${PACKAGE_DEPENDENCIES})
 
 find_package(PCL REQUIRED QUIET COMPONENTS common sample_consensus io segmentation filters)
 
-find_package(octomap REQUIRED)
+find_package(OCTOMAP REQUIRED)
 add_definitions(-DOCTOMAP_NODEBUGOUT)
 
 include_directories(
@@ -40,7 +40,7 @@ catkin_package(
   INCLUDE_DIRS include
   LIBRARIES ${PROJECT_NAME}
   CATKIN_DEPENDS ${PACKAGE_DEPENDENCIES}
-  DEPENDS octomap PCL
+  DEPENDS OCTOMAP PCL
 )
 
 set(LINK_LIBS

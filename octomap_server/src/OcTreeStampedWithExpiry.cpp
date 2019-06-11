@@ -175,18 +175,6 @@ void OcTreeStampedWithExpiry::outOfBounds(double xy_distance,
   if (root != NULL)
   {
     deleteAABB(minKey, maxKey, true, change_notification);
-//    if (outOfBoundsRecurs(root, rootKey, 0, minKey, maxKey, change_notification))
-//    {
-//      // The whole tree is out-of-bounds. This is odd but possible if no sensor data
-//      // has been received yet the base moved. It is odd enough to log this.
-//      ROS_WARN("Entire octree out-of-bounds!");
-//      delete root;
-//      if(change_notification)
-//      {
-//        change_notification(rootKey, 0);
-//      }
-//      root = NULL;
-//    }
   }
 }
 

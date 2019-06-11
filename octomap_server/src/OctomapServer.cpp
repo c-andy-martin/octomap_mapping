@@ -855,12 +855,11 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
 void OctomapServer::publishAll(const ros::Time& rostime){
 
   // Figure out which category to publish based on rate (if enabled)
-  bool publish_maps = true;
   bool publish_updates = true;
   bool publish_3d = true;
   bool publish_2d = true;
   if (m_publish3DMapPeriod > 0.0 && rostime < m_publish3DMapLastTime + ros::Duration(m_publish3DMapPeriod)) {
-    publish_maps = false;
+    publish_3d = false;
   }
   if (m_publish3DMapUpdatePeriod > 0.0 && rostime < m_publish3DMapUpdateLastTime + ros::Duration(m_publish3DMapUpdatePeriod)) {
     publish_updates = false;
@@ -868,26 +867,21 @@ void OctomapServer::publishAll(const ros::Time& rostime){
   if (m_publish2DPeriod > 0.0 && rostime < m_publish2DLastTime + ros::Duration(m_publish2DPeriod)) {
     publish_2d = false;
   }
-  // Publishing 3D topics follows publishing all
-  publish_3d = publish_maps;
-  if (publish_maps)
-  {
-    publish_2d = true;
-  }
   if (!publish_2d && !publish_3d && !publish_updates)
   {
     // there is nothing to do.
     return;
   }
 
-  if (m_useTimedMap && publish_maps){
+  if (m_useTimedMap && (publish_3d || publish_2d)){
     // If using a timed map, be sure all expiry's are up to date.
     // The expiration may not be running in-sync
     // Do this first, in the odd case that we expire all the nodes
-    m_octree->expireNodes();
+    m_octree->expireNodes(boost::bind(&OctomapServer::touchKeyAtDepth, this, _1, _2));
+    m_expireLastTime = rostime;
   }
 
-  if (publish_maps) {
+  if (publish_3d) {
     m_publish3DMapLastTime = rostime;
   }
   if (publish_updates) {
@@ -900,7 +894,7 @@ void OctomapServer::publishAll(const ros::Time& rostime){
   ros::WallTime startTime = ros::WallTime::now();
   size_t octomapSize = m_octree->size();
   // TODO: estimate num occ. voxels for size of arrays (reserve)
-  if (octomapSize <= 1){
+  if (octomapSize == 0){
     ROS_WARN("Nothing to publish, octree is empty");
     return;
   }
@@ -931,6 +925,29 @@ void OctomapServer::publishAll(const ros::Time& rostime){
   if (!publish_2d)
   {
     m_publish2DMap = false;
+  }
+
+  if (publishFullMapUpdate)
+  {
+    publishFullOctoMapUpdate(rostime);
+  }
+
+  if (publishBinaryMapUpdate)
+  {
+    publishBinaryOctoMapUpdate(rostime);
+  }
+
+  // XXX need to publish full/binary non-update maps
+
+  if (!publishFreeMarkerArray &&
+      !publishMarkerArray &&
+      !publishPointCloud &&
+      !publishBinaryMap &&
+      !publishFullMap &&
+      !m_publish2DMap)
+  {
+    // There is nothing else left to do.
+    return;
   }
 
   // init markers for free space:
@@ -1179,16 +1196,6 @@ void OctomapServer::publishAll(const ros::Time& rostime){
     m_pointCloudPub.publish(cloud);
   }
 
-  if (publishFullMapUpdate)
-  {
-    publishFullOctoMapUpdate(rostime);
-  }
-
-  if (publishBinaryMapUpdate)
-  {
-    publishBinaryOctoMapUpdate(rostime);
-  }
-
   double total_elapsed = (ros::WallTime::now() - startTime).toSec();
   ROS_DEBUG("Map publishing in OctomapServer took %f sec", total_elapsed);
 }
@@ -1314,7 +1321,6 @@ void OctomapServer::onNewFullMapSubscription(const ros::SingleSubscriberPublishe
 
 void OctomapServer::onNewFullMapUpdateSubscription(const ros::SingleSubscriberPublisher& pub)
 {
-  publishAll();
   publishFullOctoMapUpdate(ros::Time::now(), &pub);
 }
 
@@ -1333,13 +1339,13 @@ void OctomapServer::onNewBinaryMapSubscription(const ros::SingleSubscriberPublis
 
 void OctomapServer::onNewBinaryMapUpdateSubscription(const ros::SingleSubscriberPublisher& pub)
 {
-  publishAll();
   publishBinaryOctoMapUpdate(ros::Time::now(), &pub);
 }
 
 void OctomapServer::publishBinaryOctoMapUpdate(const ros::Time& rostime, const ros::SingleSubscriberPublisher* pub /* =  nullptr */) const{
 
-  octomap_msgs::OctomapUpdate map_msg;
+  octomap_msgs::OctomapUpdatePtr map_msg_ptr(new octomap_msgs::OctomapUpdate());
+  octomap_msgs::OctomapUpdate& map_msg = *map_msg_ptr;
   OcTreeT delta_map(m_res);
 
   // Set up header info
@@ -1355,7 +1361,7 @@ void OctomapServer::publishBinaryOctoMapUpdate(const ros::Time& rostime, const r
   if(   octomap_msgs::binaryMapToMsg(*m_octree_deltaBB_, map_msg.octomap_bounds)
      && octomap_msgs::binaryMapToMsg(delta_map, map_msg.octomap_update))
   {
-    m_binaryMapUpdatePub.publish(map_msg);
+    m_binaryMapUpdatePub.publish(map_msg_ptr);
   }
   else
   {
@@ -1366,7 +1372,8 @@ void OctomapServer::publishBinaryOctoMapUpdate(const ros::Time& rostime, const r
 
 void OctomapServer::publishFullOctoMapUpdate(const ros::Time& rostime, const ros::SingleSubscriberPublisher* pub /* =  nullptr */) const{
 
-  octomap_msgs::OctomapUpdate map_msg;
+  octomap_msgs::OctomapUpdatePtr map_msg_ptr(new octomap_msgs::OctomapUpdate());
+  octomap_msgs::OctomapUpdate& map_msg = *map_msg_ptr;
   OcTreeT delta_map(m_res);
 
   // Set up header info
@@ -1383,9 +1390,9 @@ void OctomapServer::publishFullOctoMapUpdate(const ros::Time& rostime, const ros
      && octomap_msgs::fullMapToMsg(delta_map, map_msg.octomap_update))
   {
     if(pub)
-      pub->publish(map_msg);
+      pub->publish(map_msg_ptr);
     else
-      m_fullMapUpdatePub.publish(map_msg);
+      m_fullMapUpdatePub.publish(map_msg_ptr);
   }
   else
   {

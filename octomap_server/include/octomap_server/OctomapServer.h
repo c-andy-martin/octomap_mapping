@@ -336,6 +336,9 @@ protected:
 
   void touchKeyAtDepth(const octomap::OcTreeKey& key, unsigned int depth = std::numeric_limits<unsigned int>::max());
   void touchKey(const octomap::OcTreeKey& key);
+  void valueChangeCallback(const octomap::OcTreeKey& key, unsigned int depth,
+      const float& prev_full_val, const bool& prev_binary_val,
+      const float& curr_full_val, const bool& curr_binary_val);
 
   static std_msgs::ColorRGBA heightMapColor(double h);
   ros::NodeHandle m_nh;
@@ -352,6 +355,7 @@ protected:
 
   OcTreeT* m_octree;
   octomap::OcTree* m_octree_deltaBB_;
+  octomap::OcTree* m_octree_binary_deltaBB_;
   octomap::KeyRay m_keyRay;  // temp storage for ray casting
   octomap::OcTreeKey m_updateBBXMin;
   octomap::OcTreeKey m_updateBBXMax;

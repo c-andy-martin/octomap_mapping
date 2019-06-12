@@ -47,6 +47,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_reconfigureServer(m_config_mutex, private_nh_),
   m_octree(NULL),
   m_octree_deltaBB_(NULL),
+  m_octree_binary_deltaBB_(NULL),
   m_maxRange(-1.0),
   m_worldFrameId("/map"), m_baseFrameId("base_footprint"),
   m_useHeightMap(true),
@@ -195,12 +196,20 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_octree->setClampingThresMin(thresMin);
   m_octree->setClampingThresMax(thresMax);
   m_octree->enableChangeDetection(true);
+  m_octree->registerValueChangeCallback(boost::bind(&OctomapServer::valueChangeCallback, this,
+      _1, _2, _3, _4, _5, _6));
 
   m_octree_deltaBB_ = new octomap::OcTree(m_res);
   m_octree_deltaBB_->setProbHit(probHit);
   m_octree_deltaBB_->setProbMiss(probMiss);
   m_octree_deltaBB_->setClampingThresMin(thresMin);
   m_octree_deltaBB_->setClampingThresMax(thresMax);
+
+  m_octree_binary_deltaBB_ = new octomap::OcTree(m_res);
+  m_octree_binary_deltaBB_->setProbHit(probHit);
+  m_octree_binary_deltaBB_->setProbMiss(probMiss);
+  m_octree_binary_deltaBB_->setClampingThresMin(thresMin);
+  m_octree_binary_deltaBB_->setClampingThresMax(thresMax);
 
   m_treeDepth = m_octree->getTreeDepth();
   m_maxTreeDepth = m_treeDepth;
@@ -1353,9 +1362,9 @@ void OctomapServer::publishBinaryOctoMapUpdate(const ros::Time& rostime, const r
   map_msg.octomap_update.header.frame_id = m_worldFrameId;
   map_msg.octomap_update.header.stamp = rostime;
 
-  delta_map.setTreeValues(m_octree, m_octree_deltaBB_);
+  delta_map.setTreeValues(m_octree, m_octree_binary_deltaBB_);
 
-  if(   octomap_msgs::binaryMapToMsg(*m_octree_deltaBB_, map_msg.octomap_bounds)
+  if(   octomap_msgs::binaryMapToMsg(*m_octree_binary_deltaBB_, map_msg.octomap_bounds)
      && octomap_msgs::binaryMapToMsg(delta_map, map_msg.octomap_update))
   {
     m_binaryMapUpdatePub.publish(map_msg_ptr);
@@ -1811,6 +1820,14 @@ void OctomapServer::touchKeyAtDepth(const OcTreeKey& key, unsigned int depth /* 
 void OctomapServer::touchKey(const OcTreeKey& key)
 {
   touchKeyAtDepth(key);
+}
+
+void OctomapServer::valueChangeCallback(const OcTreeKey& key, unsigned int depth,
+      const float& prev_full_val, const bool& prev_binary_val,
+      const float& curr_full_val, const bool& curr_binary_val){
+  if (prev_binary_val != curr_binary_val)
+    m_octree_binary_deltaBB_->setNodeValueAtDepth(key, depth, m_octree->getClampingThresMaxLog());
+  touchKeyAtDepth(key, depth);
 }
 
 std_msgs::ColorRGBA OctomapServer::heightMapColor(double h) {

@@ -1823,8 +1823,8 @@ void OctomapServer::touchKey(const OcTreeKey& key)
 }
 
 void OctomapServer::valueChangeCallback(const OcTreeKey& key, unsigned int depth,
-      const float& prev_full_val, const bool& prev_binary_val,
-      const float& curr_full_val, const bool& curr_binary_val){
+      const float prev_full_val, const bool prev_binary_val,
+      const float curr_full_val, const bool curr_binary_val){
   if (prev_binary_val != curr_binary_val)
     m_octree_binary_deltaBB_->setNodeValueAtDepth(key, depth, m_octree->getClampingThresMaxLog());
   touchKeyAtDepth(key, depth);

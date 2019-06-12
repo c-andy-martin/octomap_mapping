@@ -1816,7 +1816,7 @@ void OctomapServer::adjustMapData(nav_msgs::OccupancyGrid& map, const nav_msgs::
 
 void OctomapServer::touchKeyAtDepth(const OcTreeKey& key, unsigned int depth /* = MAX_INT */)
 {
-  m_octree_deltaBB_->setNodeValueAtDepth(key, depth, m_octree->getClampingThresMaxLog());
+  m_octree_deltaBB_->setNodeValueAtDepth(key, depth, m_octree_deltaBB_->getClampingThresMaxLog());
 }
 
 // for convenience
@@ -1829,7 +1829,7 @@ void OctomapServer::valueChangeCallback(const OcTreeKey& key, unsigned int depth
       const float prev_full_val, const bool prev_binary_val,
       const float curr_full_val, const bool curr_binary_val){
   if (prev_binary_val != curr_binary_val)
-    m_octree_binary_deltaBB_->setNodeValueAtDepth(key, depth, m_octree->getClampingThresMaxLog());
+    m_octree_binary_deltaBB_->setNodeValueAtDepth(key, depth, m_octree_binary_deltaBB_->getClampingThresMaxLog());
   touchKeyAtDepth(key, depth);
 }
 

@@ -334,9 +334,11 @@ protected:
                 || oldMapInfo.origin.position.y != newMapInfo.origin.position.y);
   }
 
+  void enableChangeCallback();
+  void disableChangeCallback();
   void touchKeyAtDepth(const octomap::OcTreeKey& key, unsigned int depth = std::numeric_limits<unsigned int>::max());
   void touchKey(const octomap::OcTreeKey& key);
-  void valueChangeCallback(const octomap::OcTreeKey& key, unsigned int depth,
+  void valueChangeCallback(const octomap::OcTreeKey& key, unsigned int depth, const bool node_just_created,
       const float prev_full_val, const bool prev_binary_val,
       const float curr_full_val, const bool curr_binary_val);
 
@@ -354,8 +356,9 @@ protected:
   dynamic_reconfigure::Server<OctomapServerConfig> m_reconfigureServer;
 
   OcTreeT* m_octree;
-  octomap::OcTree* m_octree_deltaBB_;
-  octomap::OcTree* m_octree_binary_deltaBB_;
+  OcTreeT* m_universe;
+  OcTreeT* m_octree_deltaBB_;
+  OcTreeT* m_octree_binary_deltaBB_;
   octomap::KeyRay m_keyRay;  // temp storage for ray casting
   octomap::OcTreeKey m_updateBBXMin;
   octomap::OcTreeKey m_updateBBXMax;

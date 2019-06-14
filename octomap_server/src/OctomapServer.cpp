@@ -196,21 +196,19 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   m_octree->setProbMiss(probMiss);
   m_octree->setClampingThresMin(thresMin);
   m_octree->setClampingThresMax(thresMax);
-  m_octree->enableChangeDetection(true);
-  m_octree->registerValueChangeCallback(boost::bind(&OctomapServer::valueChangeCallback, this,
-      _1, _2, _3, _4, _5, _6));
+  enableChangeCallback();
 
-  m_octree_deltaBB_ = new octomap::OcTree(m_res);
-  m_octree_deltaBB_->setProbHit(probHit);
-  m_octree_deltaBB_->setProbMiss(probMiss);
-  m_octree_deltaBB_->setClampingThresMin(thresMin);
-  m_octree_deltaBB_->setClampingThresMax(thresMax);
-
-  m_octree_binary_deltaBB_ = new octomap::OcTree(m_res);
-  m_octree_binary_deltaBB_->setProbHit(probHit);
-  m_octree_binary_deltaBB_->setProbMiss(probMiss);
-  m_octree_binary_deltaBB_->setClampingThresMin(thresMin);
-  m_octree_binary_deltaBB_->setClampingThresMax(thresMax);
+  // make the universe and delta trees "binary" in nature by making the
+  // probability of hit/miss much bigger than the clamping thresholds
+  m_universe = new OcTreeT(m_res);
+  m_universe->setProbHit(.99);
+  m_universe->setProbMiss(.01);
+  m_universe->setClampingThresMin(.1);
+  m_universe->setClampingThresMax(.9);
+  m_octree_deltaBB_ = new OcTreeT(*m_universe);
+  m_octree_binary_deltaBB_ = new OcTreeT(*m_universe);
+  // set the universe tree to occupied everywhere
+  m_universe->setNodeValueAtDepth(OcTreeKey(), 0, m_universe->getClampingThresMaxLog());
 
   m_treeDepth = m_octree->getTreeDepth();
   m_maxTreeDepth = m_treeDepth;
@@ -257,9 +255,9 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
 
   m_markerPub = m_nh.advertise<visualization_msgs::MarkerArray>("occupied_cells_vis_array", 1, m_latchedTopics);
   m_binaryMapPub = m_nh.advertise<Octomap>("octomap_binary", 1, boost::bind(&OctomapServer::onNewBinaryMapSubscription, this, _1));
-  m_binaryMapUpdatePub = m_nh.advertise<octomap_msgs::OctomapUpdate>("octomap_binary_updates", 1, boost::bind(&OctomapServer::onNewBinaryMapUpdateSubscription, this, _1));
+  m_binaryMapUpdatePub = m_nh.advertise<octomap_msgs::OctomapUpdate>("octomap_binary_updates", 10, boost::bind(&OctomapServer::onNewBinaryMapUpdateSubscription, this, _1));
   m_fullMapPub = m_nh.advertise<Octomap>("octomap_full", 1, boost::bind(&OctomapServer::onNewFullMapSubscription, this, _1));
-  m_fullMapUpdatePub = m_nh.advertise<octomap_msgs::OctomapUpdate>("octomap_full_updates", 1, boost::bind(&OctomapServer::onNewFullMapUpdateSubscription, this, _1));
+  m_fullMapUpdatePub = m_nh.advertise<octomap_msgs::OctomapUpdate>("octomap_full_updates", 10, boost::bind(&OctomapServer::onNewFullMapUpdateSubscription, this, _1));
   m_pointCloudPub = m_nh.advertise<sensor_msgs::PointCloud2>("octomap_point_cloud_centers", 1, m_latchedTopics);
   m_mapPub = m_nh.advertise<nav_msgs::OccupancyGrid>("projected_map", 5, m_latchedTopics);
   m_fmarkerPub = m_nh.advertise<visualization_msgs::MarkerArray>("free_cells_vis_array", 1, m_latchedTopics);
@@ -339,16 +337,14 @@ OctomapServer::~OctomapServer(){
   m_tfPointCloudSubs.clear();
   m_pointCloudSubs.clear();
 
-  if (m_octree){
-    delete m_octree;
-    m_octree = NULL;
-  }
+  delete m_universe;
+  m_universe = NULL;
 
-  if (m_octree_deltaBB_){
-    delete m_octree_deltaBB_;
-    m_octree_deltaBB_ = NULL;
-  }
+  delete m_octree;
+  m_octree = NULL;
 
+  delete m_octree_deltaBB_;
+  m_octree_deltaBB_ = NULL;
 }
 
 bool OctomapServer::openFile(const std::string& filename){
@@ -644,15 +640,17 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
 
     // free endpoint
     octomap::OcTreeKey endKey;
-    if (m_octree->coordToKeyChecked(point, endKey) && !update_cells.isKeyOutOfBounds(endKey)){
-      if (!update_cells.insertFree(endKey)) {
-        if (discrete) {
-          // This ray has already been traced
-          continue;
+    if (m_octree->coordToKeyChecked(point, endKey)){
+      if (!update_cells.isKeyOutOfBounds(endKey)) {
+        if (!update_cells.insertFree(endKey)) {
+          if (discrete) {
+            // This ray has already been traced
+            continue;
+          }
         }
+        updateMinKey(endKey, m_updateBBXMin);
+        updateMaxKey(endKey, m_updateBBXMax);
       }
-      updateMinKey(endKey, m_updateBBXMin);
-      updateMaxKey(endKey, m_updateBBXMax);
     } else{
       ROS_ERROR_STREAM("Could not generate Key for endpoint "<<point);
     }
@@ -780,7 +778,6 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   // JAT: Possible spot to gather update information.  For now, just worry about updating in this case
   for (SensorUpdateKeyMap::iterator it = update_cells.begin(), end=update_cells.end(); it!= end; it++) {
     m_octree->updateNode(it->key, it->value);
-    touchKey(it->key);
   }
 
   // TODO: eval lazy+updateInner vs. proper insertion
@@ -1368,18 +1365,31 @@ void OctomapServer::publishBinaryOctoMapUpdate(const ros::Time& rostime, const r
   map_msg.octomap_update.header.frame_id = m_worldFrameId;
   map_msg.octomap_update.header.stamp = rostime;
 
-  delta_map.setTreeValues(m_octree, m_octree_binary_deltaBB_);
+  OcTreeT* bounds_map_ptr = m_octree_binary_deltaBB_;
+  if (pub)
+  {
+    bounds_map_ptr = m_universe;
+  }
 
-  if(   octomap_msgs::binaryMapToMsg(*m_octree_binary_deltaBB_, map_msg.octomap_bounds)
+  delta_map.setTreeValues(m_octree, bounds_map_ptr, false, false);
+
+  if(   octomap_msgs::binaryMapToMsg(*bounds_map_ptr, map_msg.octomap_bounds)
      && octomap_msgs::binaryMapToMsg(delta_map, map_msg.octomap_update))
   {
-    m_binaryMapUpdatePub.publish(map_msg_ptr);
+    if (pub)
+      pub->publish(map_msg_ptr);
+    else
+      m_binaryMapUpdatePub.publish(map_msg_ptr);
   }
   else
   {
     ROS_ERROR("Error serializing OctoMap Update");
   }
 
+  if (!pub)
+  {
+    bounds_map_ptr->clear();
+  }
 }
 
 void OctomapServer::publishFullOctoMapUpdate(const ros::Time& rostime, const ros::SingleSubscriberPublisher* pub /* =  nullptr */) const{
@@ -1396,9 +1406,15 @@ void OctomapServer::publishFullOctoMapUpdate(const ros::Time& rostime, const ros
   map_msg.octomap_update.header.frame_id = m_worldFrameId;
   map_msg.octomap_update.header.stamp = rostime;
 
-  delta_map.setTreeValues(m_octree, m_octree_deltaBB_);
+  OcTreeT* bounds_map_ptr = m_octree_deltaBB_;
+  if (pub)
+  {
+    bounds_map_ptr = m_universe;
+  }
 
-  if(   octomap_msgs::binaryMapToMsg(*m_octree_deltaBB_, map_msg.octomap_bounds)
+  delta_map.setTreeValues(m_octree, bounds_map_ptr, false, false);
+
+  if(   octomap_msgs::binaryMapToMsg(*bounds_map_ptr, map_msg.octomap_bounds)
      && octomap_msgs::fullMapToMsg(delta_map, map_msg.octomap_update))
   {
     if(pub)
@@ -1411,6 +1427,10 @@ void OctomapServer::publishFullOctoMapUpdate(const ros::Time& rostime, const ros
     ROS_ERROR("Error serializing OctoMap Update");
   }
 
+  if (!pub)
+  {
+    bounds_map_ptr->clear();
+  }
 }
 
 
@@ -1820,6 +1840,7 @@ void OctomapServer::adjustMapData(nav_msgs::OccupancyGrid& map, const nav_msgs::
 void OctomapServer::touchKeyAtDepth(const OcTreeKey& key, unsigned int depth /* = MAX_INT */)
 {
   m_octree_deltaBB_->setNodeValueAtDepth(key, depth, m_octree_deltaBB_->getClampingThresMaxLog());
+  m_octree_binary_deltaBB_->setNodeValueAtDepth(key, depth, m_octree_binary_deltaBB_->getClampingThresMaxLog());
 }
 
 // for convenience
@@ -1828,12 +1849,25 @@ void OctomapServer::touchKey(const OcTreeKey& key)
   touchKeyAtDepth(key);
 }
 
-void OctomapServer::valueChangeCallback(const OcTreeKey& key, unsigned int depth,
+void OctomapServer::enableChangeCallback()
+{
+  m_octree->enableChangeDetection(true);
+  m_octree->registerValueChangeCallback(boost::bind(&OctomapServer::valueChangeCallback, this,
+      _1, _2, _3, _4, _5, _6, _7));
+}
+
+void OctomapServer::disableChangeCallback()
+{
+  m_octree->unregisterValueChangeCallback();
+  m_octree->enableChangeDetection(false);
+}
+
+void OctomapServer::valueChangeCallback(const OcTreeKey& key, unsigned int depth, const bool node_just_created,
       const float prev_full_val, const bool prev_binary_val,
       const float curr_full_val, const bool curr_binary_val){
-  if (prev_binary_val != curr_binary_val)
+  if (prev_binary_val != curr_binary_val || node_just_created)
     m_octree_binary_deltaBB_->setNodeValueAtDepth(key, depth, m_octree_binary_deltaBB_->getClampingThresMaxLog());
-  touchKeyAtDepth(key, depth);
+  m_octree_deltaBB_->setNodeValueAtDepth(key, depth, m_octree_deltaBB_->getClampingThresMaxLog());
 }
 
 std_msgs::ColorRGBA OctomapServer::heightMapColor(double h) {

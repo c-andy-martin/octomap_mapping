@@ -135,6 +135,7 @@ bool OcTreeStampedWithExpiry::expireNodeRecurs(OcTreeNodeStampedWithExpiry* node
         {
           //ROS_INFO_THROTTLE(1.0, "child node expired: value: %f expiry: %ld ts: %ld", node->getLogOdds(), expiry, node->getTimestamp());
           // We have expired!
+          change_notification(key, depth);
           return true;
         }
       }
@@ -226,6 +227,8 @@ void OcTreeStampedWithExpiry::updateNodeLogOdds(OcTreeNodeStampedWithExpiry* nod
       double logodds_delta = node->getLogOdds() - occ_prob_thres_log;
       node->setLogOdds(occ_prob_thres_log + logodds_delta * decay_factor);
     }
+    // The above code should not be able to alter whether the node was occupied
+    assert(isNodeOccupied(node));
   }
   OccupancyOcTreeBase<OcTreeNodeStampedWithExpiry>::updateNodeLogOdds(node, update);
   node->setTimestamp(last_expire_time);

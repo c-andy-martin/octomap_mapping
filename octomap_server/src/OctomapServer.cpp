@@ -638,10 +638,12 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
     if ((m_maxRange > 0.0) && ((point - sensorOrigin).norm() > m_maxRange) ) {
       point = sensorOrigin + (point - sensorOrigin).normalized() * m_maxRange;
     }
+    // TODO: if out-of-bounds move end-point to intersection of ray and bounds
+    // so discrete still works!!!
 
     // free endpoint
     octomap::OcTreeKey endKey;
-    if (m_octree->coordToKeyChecked(point, endKey)){
+    if (m_octree->coordToKeyChecked(point, endKey) && !update_cells.isKeyOutOfBounds(endKey)){
       if (!update_cells.insertFree(endKey)) {
         if (discrete) {
           // This ray has already been traced
@@ -670,7 +672,7 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
 
       // occupied endpoint
       OcTreeKey key;
-      if (m_octree->coordToKeyChecked(point, key)){
+      if (m_octree->coordToKeyChecked(point, key) && !update_cells.isKeyOutOfBounds(key)){
         if (!update_cells.insertOccupied(key)) {
           if (discrete) {
             // This ray has already been traced
@@ -718,6 +720,7 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
                                  originBoundary,
                                  m_octree->getResolution());
     } else {// ray longer than maxrange:;
+      // TODO: move out-of-bounds into this path so discrete still works!!!
       point3d new_end = sensorOrigin + (point - sensorOrigin).normalized() * m_maxRange;
 
       // free endpoint

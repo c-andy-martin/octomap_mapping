@@ -4,6 +4,7 @@
 #include <limits>
 #include <octomap/octomap.h>
 #include <octomap/OcTreeKey.h>
+#include <octomap_server/types.h>
 
 namespace octomap_server {
 
@@ -45,12 +46,49 @@ public:
         min_key_[1] <= key[1] && key[1] <= max_key_[1] &&
         min_key_[2] <= key[2] && key[2] <= max_key_[2]);
   }
+  void clampRayToBounds(const OcTreeT& tree, const octomap::point3d& origin, octomap::point3d* end);
   bool insertFree(octomap::OcTreeKey& key);
-  bool insertFreeRay(const octomap::point3d& origin, const octomap::point3d& end,
-                     const octomap::OcTreeKey& key_origin, const octomap::OcTreeKey& key_end,
-                     const octomap::point3d& origin_boundary,
-                     double resolution);
+  bool insertFreeRay(const OcTreeT& tree, const octomap::point3d& origin, const octomap::point3d& end);
   bool insertOccupied(octomap::OcTreeKey& key);
+  /** Insert a ray, optionally marking or clearing the end.
+   *
+   * Does nothing if the origin is out of bounds.
+   * Will clamp the end of the ray-tracing to the boundaries of this sensor
+   * update. If a ray is clamped, it will not be marked at the end.
+   * When in discrete mode, no work is done if the (clamped) end point of the
+   * ray has already been traced, with the exception that if the end point is
+   * to be marked, but was free, it will be marked.
+   *
+   * @param tree             octree to use for converting coordinates and keys
+   * @param origin           world coordinate of ray origin
+   * @param end              world coordinate of ray end
+   * @param discrete         if true, do not re-trace a ray when a key already
+   *                         exists at the ray-trace end
+   * @param end_free         if true, set the end of the ray to free space
+   * @param end_occupied     if true, set the end of the ray to occupied space
+   * @param skip_tracing     if true, skip ray tracing completely
+   * @param max_range        if positive, clamp rays to max_range, don't
+   *                         mark/clear past this range
+   * @param ray_shrink_cells if positive, shrink the ray to trace by this many
+   *                         resolution units of space. this does not change
+   *                         the end point for `end_free` or `end_clear`, but does
+   *                         alter where the ray is checked for `discrete`.
+   * @param post_mark_cells  if positive, mark this many resoultion units of
+   *                         space on the ray after the end point.
+   * @param furthest_touched_key key furthest from origin updated
+   * @return true if any work is done
+   */
+  bool insertRay(const OcTreeT& tree,
+                 const octomap::point3d& origin,
+                 const octomap::point3d& end,
+                 bool discrete=false,
+                 bool end_free=false,
+                 bool end_occupied=false,
+                 bool skip_tracing=false,
+                 double max_range=-1.0,
+                 double ray_shrink_cells=0.0,
+                 double post_mark_cells=0.0,
+                 octomap::OcTreeKey* furthest_touched_key=NULL);
 
   // Returns true if the key was inserted, false if the key already existed
   // Invalidates all prior iterators if a key is inserted.

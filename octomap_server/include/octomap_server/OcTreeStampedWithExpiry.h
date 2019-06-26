@@ -40,14 +40,6 @@ class OcTreeNodeStampedWithExpiry : public octomap::OcTreeNode
       expiry = from.expiry;
     }
 
-    // Caller must first have checked that all children are individually
-    // deleted if necessary!
-    void deleteNodeChildren()
-    {
-       delete[] children;
-       children = NULL;
-    }
-
     // timestamp
     inline time_t getTimestamp() const { return stamp; }
     inline void setTimestamp(time_t new_stamp) { stamp = new_stamp; }

@@ -26,7 +26,7 @@ void OcTreeStampedWithExpiry::expireNodes(NodeChangeNotification change_notifica
 
   if (root != NULL)
   {
-    ROS_INFO("prior to expiry, root expiry was: %ld.", root->getExpiry());
+    ROS_DEBUG("prior to expiry, root expiry was: %ld.", root->getExpiry());
     expire_count = 0;
     if (expireNodeRecurs(root, rootKey, 0, change_notification, delete_expired_nodes))
     {
@@ -41,10 +41,10 @@ void OcTreeStampedWithExpiry::expireNodes(NodeChangeNotification change_notifica
       root = NULL;
       expire_count++;
     }
-    ROS_INFO("Expired %d nodes. Last expiry time is %ld.", expire_count, last_expire_time);
+    ROS_DEBUG("Expired %d nodes. Last expiry time is %ld.", expire_count, last_expire_time);
     if (root)
     {
-      ROS_INFO("Next node expires at %ld.", root->getExpiry());
+      ROS_DEBUG("Next node expires at %ld.", root->getExpiry());
     }
   }
 }
@@ -133,7 +133,6 @@ bool OcTreeStampedWithExpiry::expireNodeRecurs(OcTreeNodeStampedWithExpiry* node
         }
         if (delete_expired_nodes && expiry <= last_expire_time)
         {
-          //ROS_INFO_THROTTLE(1.0, "child node expired: value: %f expiry: %ld ts: %ld", node->getLogOdds(), expiry, node->getTimestamp());
           // We have expired!
           change_notification(key, depth);
           return true;

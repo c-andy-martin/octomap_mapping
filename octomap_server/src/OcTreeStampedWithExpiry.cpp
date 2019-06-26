@@ -162,7 +162,6 @@ void OcTreeStampedWithExpiry::outOfBounds(double xy_distance,
                                           const octomap::point3d& base_position,
                                           DeletionCallback change_notification /* = NodeChangeNotification() */)
 {
-  octomap::OcTreeKey rootKey(this->tree_max_val, this->tree_max_val, this->tree_max_val);
   octomap::OcTreeKey minKey;
   octomap::OcTreeKey maxKey;
   calculateBounds(xy_distance, z_height, z_depth, base_position, &minKey, &maxKey);

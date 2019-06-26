@@ -90,13 +90,6 @@ bool OcTreeStampedWithExpiry::expireNodeRecurs(OcTreeNodeStampedWithExpiry* node
         // If we have no more children left, this inner node has expired too
         if (!nodeHasChildren(node))
         {
-          // Curiously, deleteNodeChild does not clean up the dynamic array
-          // for the children pointers when the child count drops to zero.
-          // pruneNode does this, but is not what we want (we want to drop the
-          // expired data, not merge it up the tree!). So prevent leaking
-          // memory be ensuring this inner node deletes the children pointer
-          // storage before the caller deletes us!
-          node->deleteNodeChildren();
           return true;
         }
         // Update the inner node's expiry to track the min of all children

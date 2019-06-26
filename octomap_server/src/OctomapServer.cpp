@@ -825,8 +825,7 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   }
 
   // Delete based on distance periodically.
-  // Skip if we just pruned or expired, as this is also (relatively) expensive
-  if (m_baseDistanceLimitPeriod > 0.0 && !pruned && m_expireLastTime != now)
+  if (m_baseDistanceLimitPeriod > 0.0)
   {
     if (m_baseToWorldValid && now >= m_baseDistanceLimitLastTime + ros::Duration(m_baseDistanceLimitPeriod)) {
       m_baseDistanceLimitLastTime = now;

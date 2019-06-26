@@ -146,12 +146,14 @@ void OcTreeStampedWithExpiry::calculateBounds(double xy_distance,
                                               octomap::OcTreeKey* max_key)
 {
   // Find the (clamped) min and max keys.
-  *min_key = this->coordToKeyClamped(base_position.x() - xy_distance,
-                                     base_position.y() - xy_distance,
-                                     base_position.z() - z_depth);
-  *max_key = this->coordToKeyClamped(base_position.x() + xy_distance,
-                                     base_position.y() + xy_distance,
-                                     base_position.z() + z_height);
+  this->coordToKeyClamped(base_position.x() - xy_distance,
+                          base_position.y() - xy_distance,
+                          base_position.z() - z_depth,
+                          *min_key);
+  this->coordToKeyClamped(base_position.x() + xy_distance,
+                          base_position.y() + xy_distance,
+                          base_position.z() + z_height,
+                          *max_key);
 }
 
 void OcTreeStampedWithExpiry::outOfBounds(double xy_distance,

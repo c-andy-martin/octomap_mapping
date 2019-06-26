@@ -28,9 +28,9 @@ add_definitions(-DOCTOMAP_NODEBUGOUT)
 
 include_directories(
   include
+  ${OCTOMAP_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
-  ${OCTOMAP_INCLUDE_DIRS}
 )
 
 

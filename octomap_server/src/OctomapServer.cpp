@@ -267,6 +267,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
       std::string ground_topic = "";
       std::string nonground_topic = "";
       std::string nonclearing_nonground_topic = "";
+      std::string nonmarking_nonground_topic = "";
       std::string sensor_origin_frame_id = "";
       XmlRpc::XmlRpcValue& segmented_topic(segmented_topics[i]);
       if (segmented_topic.getType() == XmlRpc::XmlRpcValue::TypeStruct) {
@@ -292,6 +293,13 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
             nonclearing_nonground_topic = static_cast<std::string>(v);
           }
         }
+        member = "nonmarking_nonground_topic";
+        if (segmented_topic.hasMember(member)) {
+          XmlRpc::XmlRpcValue& v(segmented_topic[member]);
+          if (v.getType() == XmlRpc::XmlRpcValue::TypeString) {
+            nonmarking_nonground_topic = static_cast<std::string>(v);
+          }
+        }
         member = "sensor_origin_frame_id";
         if (segmented_topic.hasMember(member)) {
           XmlRpc::XmlRpcValue& v(segmented_topic[member]);
@@ -301,7 +309,9 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
         }
       }
       if (!ground_topic.empty() && !nonground_topic.empty()) {
-        addSegmentedCloudTopic(ground_topic, nonground_topic, nonclearing_nonground_topic, sensor_origin_frame_id);
+        addSegmentedCloudTopic(ground_topic, nonground_topic,
+                               nonclearing_nonground_topic, nonmarking_nonground_topic,
+                               sensor_origin_frame_id);
       } else {
         ROS_WARN("In current implementation segmented topics must have both ground and nonground topics");
       }
@@ -332,6 +342,7 @@ OctomapServer::~OctomapServer(){
   // Because time synchronizers reference TF filters, delete them first
   m_sync2s.clear();
   m_sync3s.clear();
+  m_sync4s.clear();
   // Because TF message filters reference the subscriber, deleted them next
   m_tfPointCloudSubs.clear();
   m_pointCloudSubs.clear();
@@ -504,6 +515,7 @@ void OctomapServer::insertSegmentedCloudCallback(
     const sensor_msgs::PointCloud2::ConstPtr& ground_cloud,
     const sensor_msgs::PointCloud2::ConstPtr& nonground_cloud,
     const sensor_msgs::PointCloud2::ConstPtr& nonclearing_nonground_cloud,
+    const sensor_msgs::PointCloud2::ConstPtr& nonmarking_nonground_cloud,
     const std::string& sensor_origin_frame_id)
 {
   ros::WallTime startTime = ros::WallTime::now();
@@ -511,11 +523,16 @@ void OctomapServer::insertSegmentedCloudCallback(
   PCLPointCloud pc_ground;
   PCLPointCloud pc_nonground;
   PCLPointCloud pc_nonclearing_nonground;
+  PCLPointCloud pc_nonmarking_nonground;
   pcl::fromROSMsg(*ground_cloud, pc_ground);
   pcl::fromROSMsg(*nonground_cloud, pc_nonground);
   if (nonclearing_nonground_cloud)
   {
     pcl::fromROSMsg(*nonclearing_nonground_cloud, pc_nonclearing_nonground);
+  }
+  if (nonmarking_nonground_cloud)
+  {
+    pcl::fromROSMsg(*nonmarking_nonground_cloud, pc_nonmarking_nonground);
   }
 
   if (m_baseDistanceLimitPeriod > 0.0){
@@ -580,7 +597,14 @@ void OctomapServer::insertSegmentedCloudCallback(
   pass_z.setInputCloud(pc_nonclearing_nonground.makeShared());
   pass_z.filter(pc_nonclearing_nonground);
 
-  insertScan(sensorOriginTf.getOrigin(), pc_ground, pc_nonground, pc_nonclearing_nonground);
+  pass_x.setInputCloud(pc_nonmarking_nonground.makeShared());
+  pass_x.filter(pc_nonmarking_nonground);
+  pass_y.setInputCloud(pc_nonmarking_nonground.makeShared());
+  pass_y.filter(pc_nonmarking_nonground);
+  pass_z.setInputCloud(pc_nonmarking_nonground.makeShared());
+  pass_z.filter(pc_nonmarking_nonground);
+
+  insertScan(sensorOriginTf.getOrigin(), pc_ground, pc_nonground, pc_nonclearing_nonground, pc_nonmarking_nonground);
 
   double total_elapsed = (ros::WallTime::now() - startTime).toSec();
   ROS_DEBUG("Pointcloud insertion in OctomapServer done (%zu+%zu pts (ground/nonground), %f sec)", pc_ground.size(), pc_nonground.size(), total_elapsed);
@@ -589,13 +613,12 @@ void OctomapServer::insertSegmentedCloudCallback(
 }
 
 void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCloud& ground,
-                          const PCLPointCloud& nonground, const PCLPointCloud& nonclearing_nonground)
+                          const PCLPointCloud& nonground, const PCLPointCloud& nonclearing_nonground,
+                          const PCLPointCloud& nonmarking_nonground)
 {
   point3d sensorOrigin = pointTfToOctomap(sensorOriginTf);
   OcTreeKey originKey = m_octree->coordToKey(sensorOrigin);
   point3d originBoundary = m_octree->keyToCoord(originKey);
-
-  bool discrete = true;
 
   if (!m_octree->coordToKeyChecked(sensorOrigin, m_updateBBXMin)
     || !m_octree->coordToKeyChecked(sensorOrigin, m_updateBBXMax))
@@ -627,148 +650,38 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
     update_cells.setMinKey(minKey);
     update_cells.setMaxKey(maxKey);
   }
+
+  updateMinKey(originKey, m_updateBBXMin);
+  updateMaxKey(originKey, m_updateBBXMax);
+
   // insert ground points only as free:
-  for (PCLPointCloud::const_iterator it = ground.begin(); it != ground.end(); ++it){
+  for (PCLPointCloud::const_iterator it = ground.begin(); it != ground.end(); ++it)
+  {
     point3d point(it->x, it->y, it->z);
-    // maxrange check
-    if ((m_maxRange > 0.0) && ((point - sensorOrigin).norm() > m_maxRange) ) {
-      point = sensorOrigin + (point - sensorOrigin).normalized() * m_maxRange;
-    }
-    // TODO: if out-of-bounds move end-point to intersection of ray and bounds
-    // so discrete still works!!!
-
-    // free endpoint
-    octomap::OcTreeKey endKey;
-    if (m_octree->coordToKeyChecked(point, endKey)){
-      if (!update_cells.isKeyOutOfBounds(endKey)) {
-        if (!update_cells.insertFree(endKey)) {
-          if (discrete) {
-            // This ray has already been traced
-            continue;
-          }
-        }
-        updateMinKey(endKey, m_updateBBXMin);
-        updateMaxKey(endKey, m_updateBBXMax);
-      }
-    } else{
-      ROS_ERROR_STREAM("Could not generate Key for endpoint "<<point);
-    }
-
-    // only clear space (ground points)
-    update_cells.insertFreeRay(sensorOrigin, point,
-                               originKey,
-                               m_octree->coordToKey(point),
-                               originBoundary,
-                               m_octree->getResolution());
+    handleRayPoint(&update_cells, sensorOrigin, point, true, false, false);
   }
 
   // insert non-ground points: free on ray, occupied on endpoint:
-  for (PCLPointCloud::const_iterator it = nonground.begin(); it != nonground.end(); ++it){
+  for (PCLPointCloud::const_iterator it = nonground.begin(); it != nonground.end(); ++it)
+  {
     point3d point(it->x, it->y, it->z);
-    // maxrange check
-    if ((m_maxRange < 0.0) || ((point - sensorOrigin).norm() <= m_maxRange) ) {
-
-      // occupied endpoint
-      OcTreeKey key;
-      if (m_octree->coordToKeyChecked(point, key) && !update_cells.isKeyOutOfBounds(key)){
-        if (!update_cells.insertOccupied(key)) {
-          if (discrete) {
-            // This ray has already been traced
-            continue;
-          }
-        }
-
-        const unsigned int fuzz_cnt = 4;
-        point3d fuzz_point = point;
-        point3d direction = (point - sensorOrigin);
-        // only fuzz in x/y.
-        // This can't work around the edges of the FOV as we won't clear
-        // these! Just fuzz in the correct direction for further.
-//        direction.z() = 0.0;
-        direction.normalize();
-        const double fuzz_amt = 0.5 * 1.414 * m_octree->getResolution();
-        const point3d fuzz_vector = direction * fuzz_amt;
-        for (unsigned int fuzz=0; fuzz<fuzz_cnt; ++fuzz)
-        {
-          // fuzz
-          fuzz_point += fuzz_vector;
-          if (floor_truncation_ && fuzz_point.z() < floor_truncation_z_) {
-            break;
-          }
-          if (m_octree->coordToKeyChecked(fuzz_point, key)){
-            update_cells.insertOccupied(key);
-          }
-        }
-
-        updateMinKey(key, m_updateBBXMin);
-        updateMaxKey(key, m_updateBBXMax);
-
-
-#ifdef COLOR_OCTOMAP_SERVER // NB: Only read and interpret color if it's an occupied node
-        m_octree->averageNodeColor(it->x, it->y, it->z, /*r=*/it->r, /*g=*/it->g, /*b=*/it->b);
-#endif
-      }
-
-      // fuzz
-      point -= (point - sensorOrigin).normalized() * 2 * 1.414 * m_octree->getResolution();
-      // free cells
-      update_cells.insertFreeRay(sensorOrigin, point,
-                                 originKey,
-                                 m_octree->coordToKey(point),
-                                 originBoundary,
-                                 m_octree->getResolution());
-    } else {// ray longer than maxrange:;
-      // TODO: move out-of-bounds into this path so discrete still works!!!
-      point3d new_end = sensorOrigin + (point - sensorOrigin).normalized() * m_maxRange;
-
-      // free endpoint
-      octomap::OcTreeKey endKey;
-      if (m_octree->coordToKeyChecked(new_end, endKey)){
-        if (!update_cells.insertFree(endKey)) {
-          if (discrete) {
-            // This ray has already been traced
-            continue;
-          }
-        }
-        updateMinKey(endKey, m_updateBBXMin);
-        updateMaxKey(endKey, m_updateBBXMax);
-      } else{
-        ROS_ERROR_STREAM("Could not generate Key for endpoint "<<new_end);
-      }
-
-      // free cells
-      update_cells.insertFreeRay(sensorOrigin, new_end,
-                                 originKey,
-                                 m_octree->coordToKey(new_end),
-                                 originBoundary,
-                                 m_octree->getResolution());
-    }
+    handleRayPoint(&update_cells, sensorOrigin, point, false, true, false);
   }
 
   // insert non-clearing, non-ground points: occupied only on endpoint:
-  for (PCLPointCloud::const_iterator it = nonclearing_nonground.begin(); it != nonclearing_nonground.end(); ++it){
+  for (PCLPointCloud::const_iterator it = nonclearing_nonground.begin(); it != nonclearing_nonground.end(); ++it)
+  {
     point3d point(it->x, it->y, it->z);
-    // maxrange check
-    if ((m_maxRange < 0.0) || ((point - sensorOrigin).norm() <= m_maxRange) ) {
-
-      // occupied endpoint
-      OcTreeKey key;
-      if (m_octree->coordToKeyChecked(point, key)){
-        update_cells.insertOccupied(key);
-
-        updateMinKey(key, m_updateBBXMin);
-        updateMaxKey(key, m_updateBBXMax);
-
-#ifdef COLOR_OCTOMAP_SERVER // NB: Only read and interpret color if it's an occupied node
-        const int rgb = *reinterpret_cast<const int*>(&(it->rgb)); // TODO: there are other ways to encode color than this one
-        colors[0] = ((rgb >> 16) & 0xff);
-        colors[1] = ((rgb >> 8) & 0xff);
-        colors[2] = (rgb & 0xff);
-        m_octree->averageNodeColor(it->x, it->y, it->z, colors[0], colors[1], colors[2]);
-#endif
-      }
-    }
+    handleRayPoint(&update_cells, sensorOrigin, point, false, true, true);
   }
+
+  // insert non-marking, non-ground points: do not touch endpoint, clear ray
+  for (PCLPointCloud::const_iterator it = nonmarking_nonground.begin(); it != nonmarking_nonground.end(); ++it)
+  {
+    point3d point(it->x, it->y, it->z);
+    handleRayPoint(&update_cells, sensorOrigin, point, false, false, false);
+  }
+
   // now update all cells per the accumulated update
   // JAT: Possible spot to gather update information.  For now, just worry about updating in this case
   for (SensorUpdateKeyMap::iterator it = update_cells.begin(), end=update_cells.end(); it!= end; it++) {
@@ -853,6 +766,34 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
     colors = NULL;
   }
 #endif
+}
+
+void OctomapServer::handleRayPoint(SensorUpdateKeyMap* update_cells,
+                                   const octomap::point3d& sensor_origin,
+                                   const octomap::point3d& point,
+                                   bool free,
+                                   bool occupied,
+                                   bool skip_tracing)
+{
+  // XXX get from params
+  bool discrete = true;
+  double ray_shrink_cells = 2.0;
+  double post_mark_cells = 2.0;
+  octomap::OcTreeKey furthest_key;
+
+  if (free)
+  {
+    ray_shrink_cells = 0.0;
+    post_mark_cells = 0.0;
+  }
+
+  if (update_cells->insertRay(*m_octree, sensor_origin, point, discrete,
+                              free, occupied, skip_tracing,
+                              m_maxRange, ray_shrink_cells, post_mark_cells, &furthest_key))
+  {
+    updateMinKey(furthest_key, m_updateBBXMin);
+    updateMaxKey(furthest_key, m_updateBBXMax);
+  }
 }
 
 void OctomapServer::publishAll(const ros::Time& rostime){

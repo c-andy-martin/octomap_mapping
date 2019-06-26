@@ -3,6 +3,49 @@
 
 namespace octomap_server {
 
+void SensorUpdateKeyMap::clampRayToBounds(const OcTreeT& tree, const octomap::point3d& origin, octomap::point3d* end)
+{
+  octomap::OcTreeKey origin_key;
+  octomap::OcTreeKey end_key;
+  if (!tree.coordToKeyChecked(origin, origin_key))
+  {
+    // Don't adjust the end if the origin is not in the tree.
+    return;
+  }
+
+  tree.coordToKeyClamped(*end, end_key);
+  if (isKeyOutOfBounds(origin_key) || !isKeyOutOfBounds(end_key))
+  {
+    // either origin is out of bounds, or end is in bounds, nothing to do.
+    return;
+  }
+
+  // Find the dimension with the lowest ratio of projected length vs. actual.
+  octomap::point3d direction = *end - origin;
+
+  float smallest_ratio = std::numeric_limits<typeof(direction(0))>::max();
+  for (int i=0; i<3; i++)
+  {
+    if (direction(i) != 0.0)
+    {
+      auto min_pt_i = tree.keyToCoord(min_key_[i]);
+      auto max_pt_i = tree.keyToCoord(max_key_[i]);
+      auto numer = (direction(i) < 0.0 ? min_pt_i : max_pt_i) - origin(i);
+      auto ratio = numer / direction(i);
+      if (ratio > 0.0 && ratio < smallest_ratio )
+      {
+        smallest_ratio = ratio;
+      }
+    }
+  }
+  // project ray using smallest ratio
+  octomap::point3d new_end = origin + direction * smallest_ratio;
+  // round to cell center using tree coord to key operations
+  tree.coordToKeyClamped(new_end, end_key);
+  assert (!isKeyOutOfBounds(end_key));
+  *end = tree.keyToCoord(end_key);
+}
+
 SensorUpdateKeyMap::iterator SensorUpdateKeyMap::begin()
 {
   for (size_t i=0; i<table_.size(); ++i)
@@ -158,20 +201,36 @@ bool SensorUpdateKeyMap::insertFreeCells(const octomap::OcTreeKey *free_cells, s
   return true;
 }
 
-bool SensorUpdateKeyMap::insertFreeRay(const octomap::point3d& origin, const octomap::point3d& end,
-                     const octomap::OcTreeKey& key_origin, const octomap::OcTreeKey& key_end,
-                     const octomap::point3d& origin_boundary,
-                     double resolution)
+bool SensorUpdateKeyMap::insertFreeRay(const OcTreeT& tree,
+                                        const octomap::point3d& origin,
+                                        const octomap::point3d& end)
 {
   // a version of computeRayKeys from OcTreeBaseImpl.hxx which adds the ray
   // keys directly to the our SensorUpdateKeyMap
 
-  // Nothing to do if origin and end are in same cell
-  if (key_origin == key_end)
+  octomap::OcTreeKey origin_key, end_key;
+  if (!tree.coordToKeyChecked(origin, origin_key))
+  {
     return false;
+  }
+  if (!tree.coordToKeyChecked(end, end_key))
+  {
+    return false;
+  }
+  if (isKeyOutOfBounds(origin_key))
+  {
+    return false;
+  }
+  // Nothing to do if origin and end are in same cell
+  if (origin_key == end_key)
+  {
+    return false;
+  }
 
   // Initialization
   octomap::point3d direction = (end - origin);
+  octomap::point3d origin_boundary = tree.keyToCoord(origin_key);
+  double resolution = tree.getResolution();
   float length = (float) direction.norm();
   direction /= length; // normalize vector
 
@@ -179,14 +238,14 @@ bool SensorUpdateKeyMap::insertFreeRay(const octomap::point3d& origin, const oct
   double tMax[3];
   double tDelta[3];
 
-  octomap::OcTreeKey current_key = key_origin;
+  octomap::OcTreeKey current_key = origin_key;
   octomap::OcTreeKey justOut;
 
   size_t max_cells = 0;
 
   for(unsigned int i=0; i < 3; ++i) {
     // tally up max_cells (maximum ray trace is one cell per delta dimension)
-    max_cells += abs(key_origin[i] - key_end[i]) + 1;
+    max_cells += abs(origin_key[i] - end_key[i]) + 1;
 
     // compute step direction
     if (direction(i) > 0.0) step[i] = 1;
@@ -201,7 +260,7 @@ bool SensorUpdateKeyMap::insertFreeRay(const octomap::point3d& origin, const oct
 
       tMax[i] = ( voxelBorder - origin(i) ) / direction(i);
       tDelta[i] = resolution / fabs( direction(i) );
-      justOut[i] = key_end[i] + step[i];
+      justOut[i] = end_key[i] + step[i];
     }
     else {
       tMax[i] =  std::numeric_limits<double>::max( );
@@ -270,6 +329,150 @@ bool SensorUpdateKeyMap::insertFreeRay(const octomap::point3d& origin, const oct
     }
   }
   return insertFreeCells(free_cells_, free_cells_count);
+}
+
+bool SensorUpdateKeyMap::insertRay(const OcTreeT& tree,
+                                   const octomap::point3d& origin,
+                                   const octomap::point3d& end,
+                                   bool discrete,
+                                   bool end_free,
+                                   bool end_occupied,
+                                   bool skip_tracing,
+                                   double max_range,
+                                   double ray_shrink_cells,
+                                   double post_mark_cells,
+                                   octomap::OcTreeKey* furthest_touched_key)
+{
+  bool cells_added = false;
+  octomap::OcTreeKey origin_key, end_key, adjusted_end_key;
+  if (!tree.coordToKeyChecked(origin, origin_key))
+  {
+    // origin key is not in the tree
+    return false;
+  }
+  if (isKeyOutOfBounds(origin_key))
+  {
+    // origin key is outside of bounds, we do not support starting tracing
+    // out-of-bounds.
+    return false;
+  }
+
+  const octomap::point3d ray = end - origin;
+  const octomap::point3d direction = ray.normalized();
+
+  // Find the adjusted ray trace end point.
+  octomap::point3d adjusted_end = end;
+  // Adjust the end first for ray_shrink_cells
+  if (ray_shrink_cells > 0.0)
+  {
+    const double ray_shrink_length = ray_shrink_cells * tree.getResolution();
+    if (ray.norm() <= ray_shrink_length)
+    {
+      // Our ray will shrink to nothing. Nothing left to do.
+      return false;
+    }
+    adjusted_end -= direction * ray_shrink_length;
+  }
+
+  // Next, adjust for max range
+  if (max_range > 0.0 && (adjusted_end - origin).norm() > max_range)
+  {
+    adjusted_end = origin + direction * max_range;
+  }
+
+  // Finally, adjust the end to the bounds.
+  clampRayToBounds(tree, origin, &adjusted_end);
+
+  adjusted_end_key = tree.coordToKey(adjusted_end);
+  assert(!isKeyOutOfBounds(adjusted_end_key));
+
+  // Check the adjusted end before marking or clearing the end point to correctly apply discrete.
+  if (discrete)
+  {
+    if (find(adjusted_end_key) != this->end())
+    {
+      // ray tracing endpoint already in update, skip ray-tracing.
+      skip_tracing = true;
+    }
+  }
+
+  if (end_free || end_occupied)
+  {
+    if (max_range <= 0.0 || ray.norm() <= max_range)
+    {
+      if (tree.coordToKeyChecked(end, end_key))
+      {
+        if (!isKeyOutOfBounds(end_key))
+        {
+          bool inserted = false;
+          if (insert(end_key, end_occupied))
+          {
+            inserted = true;
+            cells_added = true;
+            if (furthest_touched_key)
+            {
+              *furthest_touched_key = end_key;
+            }
+          }
+          else
+          {
+            if (discrete)
+            {
+              // we have information already on this cell, do not raytrace
+              skip_tracing = true;
+            }
+          }
+          if (!discrete || !inserted)
+          {
+            if (end_occupied && post_mark_cells > 0.0)
+            {
+              // apply any post_mark_cells
+              octomap::point3d step_point = end;
+              const unsigned int step_cnt = std::round(post_mark_cells * 2);
+              const double step_amt = 0.5 * tree.getResolution();
+              octomap::point3d step_vector = direction * step_amt;
+              for (unsigned int step=0; step<step_cnt; ++step)
+              {
+                step_point += step_vector;
+                if (truncate_floor_ && step_point.z() < truncate_floor_z_) {
+                  break;
+                }
+                octomap::OcTreeKey mark_key;
+                if (tree.coordToKeyChecked(step_point, mark_key))
+                {
+                  if (!isKeyOutOfBounds(mark_key))
+                  {
+                    if (insertOccupied(mark_key))
+                    {
+                      cells_added = true;
+                      if (furthest_touched_key)
+                      {
+                        *furthest_touched_key = mark_key;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (!skip_tracing)
+  {
+    if (insertFreeRay(tree, origin, adjusted_end))
+    {
+      if (!cells_added && furthest_touched_key)
+      {
+        *furthest_touched_key = tree.coordToKey(adjusted_end);
+      }
+      cells_added = true;
+    }
+  }
+
+  return cells_added;
 }
 
 // Returns true if a node was inserted, false if the node already existed

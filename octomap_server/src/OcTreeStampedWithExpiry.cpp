@@ -171,8 +171,8 @@ void OcTreeStampedWithExpiry::outOfBounds(double xy_distance,
   octomap::OcTreeKey minKey;
   octomap::OcTreeKey maxKey;
   calculateBounds(xy_distance, z_height, z_depth, base_position, &minKey, &maxKey);
-  ROS_INFO_STREAM("Limiting to min key (" << minKey[0] << ", " << minKey[1] << ", " << minKey[2] <<
-                    "), max key (" << maxKey[0] << ", " << maxKey[1] << ", " << maxKey[2] << ")");
+  ROS_DEBUG_STREAM("Limiting to min key (" << minKey[0] << ", " << minKey[1] << ", " << minKey[2] <<
+                   "), max key (" << maxKey[0] << ", " << maxKey[1] << ", " << maxKey[2] << ")");
   if (root != NULL)
   {
     deleteAABB(minKey, maxKey, true, change_notification);

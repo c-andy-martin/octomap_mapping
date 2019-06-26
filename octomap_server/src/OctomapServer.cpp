@@ -750,7 +750,7 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
         ss << " depth to " << m_baseDepthLimit;
       }
       ss << " from (" << origin.x() << ", " << origin.y() << ", " << origin.z() << ")";
-      ROS_INFO_STREAM(ss.str());
+      ROS_DEBUG_STREAM(ss.str());
       octomap::point3d base_position(origin.x(), origin.y(), origin.z());
       m_octree->outOfBounds(m_base2DDistanceLimit, m_baseHeightLimit, m_baseDepthLimit, base_position,
           boost::bind(&OctomapServer::touchKeyAtDepth, this, _3, _4));

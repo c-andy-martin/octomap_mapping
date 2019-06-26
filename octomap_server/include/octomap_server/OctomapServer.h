@@ -79,21 +79,13 @@
 #include <octomap/ColorOcTree.h>
 #endif
 
+#include <octomap_server/types.h>
 #include <octomap_server/OcTreeStampedWithExpiry.h>
 
 namespace octomap_server {
 class OctomapServer {
 
 public:
-#ifdef COLOR_OCTOMAP_SERVER
-  typedef pcl::PointXYZRGB PCLPoint;
-  typedef pcl::PointCloud<pcl::PointXYZRGB> PCLPointCloud;
-  typedef octomap::ColorOcTree OcTreeT;
-#else
-  typedef pcl::PointXYZ PCLPoint;
-  typedef pcl::PointCloud<pcl::PointXYZ> PCLPointCloud;
-  typedef octomap_server::OcTreeStampedWithExpiry OcTreeT;
-#endif
   typedef octomap_msgs::GetOctomap OctomapSrv;
   typedef octomap_msgs::BoundingBoxQuery BBXSrv;
 

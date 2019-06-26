@@ -106,7 +106,8 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
     // Remove all expired nodes.
     // This also calculates and stores any missing expiration times in the tree.
     // This function should be called periodically.
-    void expireNodes(NodeChangeNotification change_notification = NodeChangeNotification());
+    void expireNodes(NodeChangeNotification change_notification = NodeChangeNotification(),
+                     bool delete_expired_nodes = true);
 
     // Calculate min/max octree keys based on given parameters
     void calculateBounds(double xy_distance,
@@ -159,7 +160,8 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
     bool expireNodeRecurs(OcTreeNodeStampedWithExpiry* node,
                           const octomap::OcTreeKey& key,
                           int depth,
-                          NodeChangeNotification change_notification = NodeChangeNotification());
+                          const NodeChangeNotification& change_notification,
+                          bool delete_expired_nodes = true);
 
     /**
      * Static member object which ensures that this OcTree's prototype

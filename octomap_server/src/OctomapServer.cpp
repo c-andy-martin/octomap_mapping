@@ -882,14 +882,6 @@ void OctomapServer::publishAll(const ros::Time& rostime){
     return;
   }
 
-  if (m_useTimedMap && (publish_3d || publish_2d)){
-    // If using a timed map, be sure all expiry's are up to date.
-    // The expiration may not be running in-sync
-    // Do this first, in the odd case that we expire all the nodes
-    m_octree->expireNodes(boost::bind(&OctomapServer::touchKeyAtDepth, this, _1, _2));
-    m_expireLastTime = rostime;
-  }
-
   if (publish_3d) {
     m_publish3DMapLastTime = rostime;
   }
@@ -957,6 +949,13 @@ void OctomapServer::publishAll(const ros::Time& rostime){
   {
     // There is nothing else left to do.
     return;
+  }
+
+  if (m_useTimedMap && publishMarkerArray)
+  {
+    // Update the 'expiry' field for any nodes that have deferred expiration
+    // to get correct color in the marker array
+    m_octree->expireNodes(NodeChangeNotification(), false);
   }
 
   // init markers for free space:

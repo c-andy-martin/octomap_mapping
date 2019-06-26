@@ -23,8 +23,8 @@ add_definitions(-DOCTOMAP_NODEBUGOUT)
 
 include_directories(
   include
-  ${catkin_INCLUDE_DIRS}
   ${OCTOMAP_INCLUDE_DIRS}
+  ${catkin_INCLUDE_DIRS}
 )
 
 generate_dynamic_reconfigure_options(cfg/OctomapServer.cfg)

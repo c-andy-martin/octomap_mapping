@@ -3,6 +3,11 @@ project(octomap_server)
 
 set(CMAKE_CXX_STANDARD 11)
 
+set(EXTRA_COMPILE_OPTIONS
+  $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>: -Werror>
+  $<$<CXX_COMPILER_ID:MSVC>: /W4 /WX>
+)
+
 set(PACKAGE_DEPENDENCIES
   roscpp
   visualization_msgs
@@ -57,6 +62,7 @@ add_library(${PROJECT_NAME}
   src/OcTreeStampedWithExpiry.cpp
 )
 target_link_libraries(${PROJECT_NAME} ${LINK_LIBS})
+target_compile_options(${PROJECT_NAME} PRIVATE ${EXTRA_COMPILE_OPTIONS})
 add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_gencfg)
 
 add_executable(octomap_server_node src/octomap_server_node.cpp)

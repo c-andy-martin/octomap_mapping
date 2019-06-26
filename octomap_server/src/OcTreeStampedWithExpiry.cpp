@@ -14,7 +14,8 @@ OcTreeStampedWithExpiry::OcTreeStampedWithExpiry(double resolution)
   ocTreeStampedWithExpiryMemberInit.ensureLinking();
 }
 
-void OcTreeStampedWithExpiry::expireNodes(NodeChangeNotification change_notification /* = NodeChangeNotification() */)
+void OcTreeStampedWithExpiry::expireNodes(NodeChangeNotification change_notification /* = NodeChangeNotification() */,
+                                          bool delete_expired_nodes /* = true */)
 {
   octomap::OcTreeKey rootKey(this->tree_max_val, this->tree_max_val, this->tree_max_val);
   last_expire_time = ros::Time::now().sec;
@@ -27,7 +28,7 @@ void OcTreeStampedWithExpiry::expireNodes(NodeChangeNotification change_notifica
   {
     ROS_INFO("prior to expiry, root expiry was: %ld.", root->getExpiry());
     expire_count = 0;
-    if (expireNodeRecurs(root, rootKey, 0,change_notification))
+    if (expireNodeRecurs(root, rootKey, 0, change_notification, delete_expired_nodes))
     {
       // The whole tree expired. This is odd but possible if no sensor data
       // has been received. It is odd enough to log this.
@@ -51,7 +52,8 @@ void OcTreeStampedWithExpiry::expireNodes(NodeChangeNotification change_notifica
 bool OcTreeStampedWithExpiry::expireNodeRecurs(OcTreeNodeStampedWithExpiry* node,
                                                const octomap::OcTreeKey& key,
                                                int depth,
-                                               NodeChangeNotification change_notification /* = NodeChangeNotification() */)
+                                               const NodeChangeNotification& change_notification,
+                                               bool delete_expired_nodes /* = true */)
 {
   octomap::key_type center_offset_key = this->tree_max_val >> (depth + 1);
   // We can prune our search tree using the stored expiry.
@@ -63,6 +65,11 @@ bool OcTreeStampedWithExpiry::expireNodeRecurs(OcTreeNodeStampedWithExpiry* node
 //  if (isNodeOccupied(node))
   {
     time_t expiry = node->getExpiry();
+    // If we are not deleting, only update those nodes which have no expiry.
+    if (!delete_expired_nodes && expiry != 0)
+    {
+      return false;
+    }
     // For inner nodes, expiry is the minimum of all child nodes expiry's.
     // For nodes which have not yet had expiry calculated, expiry will be zero
     // If this node (or any child) has expired or this node (or any child) has
@@ -79,7 +86,7 @@ bool OcTreeStampedWithExpiry::expireNodeRecurs(OcTreeNodeStampedWithExpiry* node
           {
             octomap::OcTreeKey child_key;
             computeChildKey(i, center_offset_key, key, child_key);
-            if (expireNodeRecurs(getNodeChild(node, i), child_key, depth+1, change_notification))
+            if (expireNodeRecurs(getNodeChild(node, i), child_key, depth+1, change_notification, delete_expired_nodes))
             {
               // Delete the child node
               deleteNodeChild(node, i);
@@ -124,7 +131,7 @@ bool OcTreeStampedWithExpiry::expireNodeRecurs(OcTreeNodeStampedWithExpiry* node
           }
           */
         }
-        if (expiry <= last_expire_time)
+        if (delete_expired_nodes && expiry <= last_expire_time)
         {
           //ROS_INFO_THROTTLE(1.0, "child node expired: value: %f expiry: %ld ts: %ld", node->getLogOdds(), expiry, node->getTimestamp());
           // We have expired!

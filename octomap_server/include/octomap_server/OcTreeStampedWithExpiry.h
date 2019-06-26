@@ -136,18 +136,6 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
       return a_coeff_log_odds_* clamping_thres_max * clamping_thres_max + c_coeff_;
     }
 
-    inline octomap::key_type coordToKeyClamped(double coordinate) const {
-      if (coordinate > keyToCoord(std::numeric_limits<octomap::key_type>::max())) {
-        return std::numeric_limits<octomap::key_type>::max();
-      } else if (coordinate < keyToCoord(std::numeric_limits<octomap::key_type>::min())) {
-        return std::numeric_limits<octomap::key_type>::min();
-      }
-      return coordToKey(coordinate);
-    }
-
-    inline octomap::OcTreeKey coordToKeyClamped(double x, double y, double z) const {
-      return octomap::OcTreeKey(coordToKeyClamped(x), coordToKeyClamped(y), coordToKeyClamped(z));
-    }
   protected:
     // Quadratic delta-t expiration coefficients. The input is the number of
     // times a particular mode was marked from the default value (which would

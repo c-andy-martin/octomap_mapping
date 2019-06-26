@@ -1308,6 +1308,8 @@ bool OctomapServer::resetSrv(std_srvs::Empty::Request& req, std_srvs::Empty::Res
   }
   m_fmarkerPub.publish(freeNodesVis);
 
+  // Force full publish
+  touchKeyAtDepth(octomap::OcTreeKey(), 0);
   return true;
 }
 

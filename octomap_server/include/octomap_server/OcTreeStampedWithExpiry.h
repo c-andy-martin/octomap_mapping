@@ -20,13 +20,6 @@ class OcTreeNodeStampedWithExpiry : public octomap::OcTreeNode
 
     OcTreeNodeStampedWithExpiry() : octomap::OcTreeNode(), stamp(0), expiry(0) {}
 
-    OcTreeNodeStampedWithExpiry(const OcTreeNodeStampedWithExpiry& rhs) :
-        octomap::OcTreeNode(rhs),
-        stamp(rhs.stamp),
-        expiry(rhs.expiry)
-    {
-    }
-
     bool operator==(const OcTreeNodeStampedWithExpiry& rhs) const
     {
       // No need to compare expiry, as it is a function of stamp and value

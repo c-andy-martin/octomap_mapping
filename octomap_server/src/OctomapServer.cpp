@@ -86,6 +86,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_initConfig(true),
   m_expirePeriod(0.0),
   m_expireLastTime(ros::Time::now()),
+  m_deferUpdateToPublish(false),
   m_baseDistanceLimitPeriod(0.0),
   m_baseDistanceLimitLastTime(ros::Time::now()),
   m_base2DDistanceLimit(std::numeric_limits<double>::max()),
@@ -144,6 +145,8 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
 
   // only enabled when expireTimeDelta is positive
   m_nh_private.param("expire_time_delta", m_expirePeriod, m_expirePeriod);
+
+  m_nh_private.param("defer_update_to_publish", m_deferUpdateToPublish, m_deferUpdateToPublish);
 
   m_nh_private.param("base_distance_limit_time_delta", m_baseDistanceLimitPeriod, m_baseDistanceLimitPeriod);
   m_nh_private.param("base_2d_distance_limit", m_base2DDistanceLimit, m_base2DDistanceLimit);
@@ -635,13 +638,11 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
 #endif
 
   // instead of direct scan insertion, compute update to filter ground:
-  static SensorUpdateKeyMap update_cells;
-  update_cells.clear();
   bool floor_truncation_ = true;
   double floor_truncation_z_ = 0.0;
   if (floor_truncation_)
   {
-    update_cells.setFloorTruncation(m_octree->coordToKey(floor_truncation_z_));
+    m_updateCells.setFloorTruncation(m_octree->coordToKey(floor_truncation_z_));
   }
   if (m_baseDistanceLimitPeriod > 0.0)
   {
@@ -651,8 +652,8 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
     octomap::OcTreeKey maxKey;
     m_octree->calculateBounds(m_update2DDistanceLimit, m_updateHeightLimit, m_updateDepthLimit, base_position,
                               &minKey, &maxKey);
-    update_cells.setMinKey(minKey);
-    update_cells.setMaxKey(maxKey);
+    m_updateCells.setMinKey(minKey);
+    m_updateCells.setMaxKey(maxKey);
   }
 
   updateMinKey(originKey, m_updateBBXMin);
@@ -662,34 +663,33 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   for (PCLPointCloud::const_iterator it = ground.begin(); it != ground.end(); ++it)
   {
     point3d point(it->x, it->y, it->z);
-    handleRayPoint(&update_cells, sensorOrigin, point, true, false, false);
+    handleRayPoint(&m_updateCells, sensorOrigin, point, true, false, false);
   }
 
   // insert non-ground points: free on ray, occupied on endpoint:
   for (PCLPointCloud::const_iterator it = nonground.begin(); it != nonground.end(); ++it)
   {
     point3d point(it->x, it->y, it->z);
-    handleRayPoint(&update_cells, sensorOrigin, point, false, true, false);
+    handleRayPoint(&m_updateCells, sensorOrigin, point, false, true, false);
   }
 
   // insert non-clearing, non-ground points: occupied only on endpoint:
   for (PCLPointCloud::const_iterator it = nonclearing_nonground.begin(); it != nonclearing_nonground.end(); ++it)
   {
     point3d point(it->x, it->y, it->z);
-    handleRayPoint(&update_cells, sensorOrigin, point, false, true, true);
+    handleRayPoint(&m_updateCells, sensorOrigin, point, false, true, true);
   }
 
   // insert non-marking, non-ground points: do not touch endpoint, clear ray
   for (PCLPointCloud::const_iterator it = nonmarking_nonground.begin(); it != nonmarking_nonground.end(); ++it)
   {
     point3d point(it->x, it->y, it->z);
-    handleRayPoint(&update_cells, sensorOrigin, point, false, false, false);
+    handleRayPoint(&m_updateCells, sensorOrigin, point, false, false, false);
   }
 
-  // now update all cells per the accumulated update
-  // JAT: Possible spot to gather update information.  For now, just worry about updating in this case
-  for (SensorUpdateKeyMap::iterator it = update_cells.begin(), end=update_cells.end(); it!= end; it++) {
-    m_octree->updateNode(it->key, it->value);
+  if (!m_deferUpdateToPublish)
+  {
+    applyUpdate();
   }
 
   // TODO: eval lazy+updateInner vs. proper insertion
@@ -800,6 +800,16 @@ void OctomapServer::handleRayPoint(SensorUpdateKeyMap* update_cells,
   }
 }
 
+void OctomapServer::applyUpdate()
+{
+  // update all cells per the accumulated update
+  for (SensorUpdateKeyMap::iterator it = m_updateCells.begin(), end=m_updateCells.end(); it!= end; it++) {
+    m_octree->updateNode(it->key, it->value);
+  }
+  // clear stored update
+  m_updateCells.clear();
+}
+
 void OctomapServer::publishAll(const ros::Time& rostime){
 
   // Figure out which category to publish based on rate (if enabled)
@@ -819,6 +829,11 @@ void OctomapServer::publishAll(const ros::Time& rostime){
   {
     // there is nothing to do.
     return;
+  }
+
+  if (m_deferUpdateToPublish)
+  {
+    applyUpdate();
   }
 
   if (publish_3d) {

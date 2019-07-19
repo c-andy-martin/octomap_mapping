@@ -333,6 +333,8 @@ protected:
                       bool occupied,
                       bool skip_tracing);
 
+  void applyUpdate();
+
   /// label the input cloud "pc" into ground and nonground. Should be in the robot's fixed frame (not world!)
   void filterGroundPlane(const PCLPointCloud& pc, PCLPointCloud& ground, PCLPointCloud& nonground) const;
 
@@ -485,6 +487,10 @@ protected:
   // time-based degrading
   double m_expirePeriod;
   ros::Time m_expireLastTime;
+
+  // efficient sensor update tracking
+  SensorUpdateKeyMap m_updateCells;
+  bool m_deferUpdateToPublish;
 
   // base distance-based deletion (<= 0.0 is disabled)
   double m_baseDistanceLimitPeriod;

@@ -54,6 +54,7 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   m_useColoredMap(false),
   m_colorFactor(0.8),
   m_latchedTopics(true),
+  m_callbackSkipCount(0),
   m_trackFreeSpace(true),
   m_publishFreeSpace(false),
   m_publish3DMapPeriod(0.0),
@@ -147,6 +148,7 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   private_nh.param("expire_time_delta", m_expirePeriod, m_expirePeriod);
 
   private_nh.param("defer_update_to_publish", m_deferUpdateToPublish, m_deferUpdateToPublish);
+  private_nh.param("skip_count", m_callbackSkipCount, m_callbackSkipCount);
 
   private_nh.param("base_distance_limit_time_delta", m_baseDistanceLimitPeriod, m_baseDistanceLimitPeriod);
   private_nh.param("base_2d_distance_limit", m_base2DDistanceLimit, m_base2DDistanceLimit);
@@ -354,6 +356,7 @@ OctomapServer::~OctomapServer(){
   // Because TF message filters reference the subscriber, deleted them next
   m_tfPointCloudSubs.clear();
   m_pointCloudSubs.clear();
+  m_callbackCounts.clear();
 
   delete m_universe;
   m_universe = NULL;
@@ -524,8 +527,17 @@ void OctomapServer::insertSegmentedCloudCallback(
     const sensor_msgs::PointCloud2::ConstPtr& nonground_cloud,
     const sensor_msgs::PointCloud2::ConstPtr& nonclearing_nonground_cloud,
     const sensor_msgs::PointCloud2::ConstPtr& nonmarking_nonground_cloud,
-    const std::string& sensor_origin_frame_id)
+    const std::string& sensor_origin_frame_id,
+    unsigned int callback_id)
 {
+  if (m_callbackCounts[callback_id] < m_callbackSkipCount)
+  {
+    // skip the callback until we are at the skip count
+    ++m_callbackCounts[callback_id];
+    return;
+  }
+  m_callbackCounts[callback_id] = 0;
+
   ros::WallTime startTime = ros::WallTime::now();
 
   PCLPointCloud pc_ground;

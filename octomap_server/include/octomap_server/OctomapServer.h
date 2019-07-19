@@ -98,7 +98,8 @@ public:
                                             const sensor_msgs::PointCloud2::ConstPtr& nonground_cloud,
                                             const sensor_msgs::PointCloud2::ConstPtr& nonclearing_nonground_cloud,
                                             const sensor_msgs::PointCloud2::ConstPtr& nonmarking_nonground_cloud,
-                                            const std::string& sensor_origin_frame_id);
+                                            const std::string& sensor_origin_frame_id,
+                                            unsigned int callback_id);
   virtual bool openFile(const std::string& filename);
 
   void startTrackingBounds(std::string name);
@@ -135,6 +136,8 @@ protected:
                                      const std::string &nonclearing_nonground_topic,
                                      const std::string &nonmarking_nonground_topic,
                                      const std::string &sensor_origin_frame_id) {
+    int callback_id = m_callbackCounts.size();
+    m_callbackCounts.push_back(0);
     boost::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2> > groundPointCloudSub(
       new message_filters::Subscriber<sensor_msgs::PointCloud2> (
         m_nh,
@@ -228,7 +231,8 @@ protected:
       );
       m_sync4->registerCallback(boost::bind(&OctomapServer::insertSegmentedCloudCallback, this, _1, _2,
                                             _3, _4,
-                                            sensor_origin_frame_id));
+                                            sensor_origin_frame_id,
+                                            callback_id));
       m_sync4s.push_back(m_sync4);
     }
     else if (tfNonclearingNongroundPointCloudSub)
@@ -244,7 +248,8 @@ protected:
       );
       m_sync3->registerCallback(boost::bind(&OctomapServer::insertSegmentedCloudCallback, this, _1, _2,
                                             _3, sensor_msgs::PointCloud2::ConstPtr(),
-                                            sensor_origin_frame_id));
+                                            sensor_origin_frame_id,
+                                            callback_id));
       m_sync3s.push_back(m_sync3);
     }
     else if (tfNonmarkingNongroundPointCloudSub)
@@ -260,7 +265,8 @@ protected:
       );
       m_sync3->registerCallback(boost::bind(&OctomapServer::insertSegmentedCloudCallback, this, _1, _2,
                                             sensor_msgs::PointCloud2::ConstPtr(), _3,
-                                            sensor_origin_frame_id));
+                                            sensor_origin_frame_id,
+                                            callback_id));
       m_sync3s.push_back(m_sync3);
     }
     else
@@ -275,7 +281,8 @@ protected:
       );
       m_sync2->registerCallback(boost::bind(&OctomapServer::insertSegmentedCloudCallback, this, _1, _2,
                                             sensor_msgs::PointCloud2::ConstPtr(), sensor_msgs::PointCloud2::ConstPtr(),
-                                            sensor_origin_frame_id));
+                                            sensor_origin_frame_id,
+                                            callback_id));
       m_sync2s.push_back(m_sync2);
     }
   }
@@ -436,6 +443,8 @@ protected:
   double m_colorFactor;
 
   bool m_latchedTopics;
+  int m_callbackSkipCount;
+  std::vector<unsigned int> m_callbackCounts;
   bool m_trackFreeSpace;
   bool m_publishFreeSpace;
   bool m_newFullSub;

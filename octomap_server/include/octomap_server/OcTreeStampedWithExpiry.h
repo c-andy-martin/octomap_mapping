@@ -137,6 +137,12 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
       return a_coeff_log_odds_* clamping_thres_max * clamping_thres_max + c_coeff_;
     }
 
+    /// When a node is updated to the minimum, delete it if present and do not store
+    void setDeleteMinimum(bool enable) { delete_minimum = enable; }
+
+    /// Get mode of deleting free space
+    bool getDeleteMinimum() { return delete_minimum; }
+
   protected:
     // Quadratic delta-t expiration coefficients. The input is the number of
     // times a particular mode was marked from the default value (which would
@@ -154,6 +160,8 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
     // updated.
     time_t last_expire_time;
     int expire_count;
+
+    bool delete_minimum;
 
     // Return true if this node has expired.
     // Assume node is valid.

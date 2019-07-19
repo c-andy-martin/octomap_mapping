@@ -10,6 +10,7 @@ OcTreeStampedWithExpiry::OcTreeStampedWithExpiry(double resolution)
   , quadratic_start_(30.0)
   , c_coeff_free_(60.0*60.0*18.0)
   , last_expire_time(0)
+  , delete_minimum(false)
 {
   ocTreeStampedWithExpiryMemberInit.ensureLinking();
 }
@@ -184,6 +185,26 @@ OcTreeNodeStampedWithExpiry* OcTreeStampedWithExpiry::updateNode(const octomap::
   // early abort (no change will happen).
   // may cause an overhead in some configuration, but more often helps
   OcTreeNodeStampedWithExpiry* leaf = this->search(key);
+  // NOTE: if the tree ever has a default value, that should be considered
+  // here. We assume that the default construction value of the node is 0.0
+  // log odds. As long as the update would make the node the minimum, the
+  // node is never stored. If this is the desired behavior, the user of the
+  // tree should ensure it is setup that way for maximum performance gain.
+  if (!leaf && delete_minimum && log_odds_update <= 0 && (0.0 + log_odds_update) <= this->clamping_thres_min)
+  {
+    return NULL;
+  }
+  if (leaf && delete_minimum && leaf->getLogOdds() + log_odds_update <= this->clamping_thres_min)
+  {
+    // Lie and say the node was just created. This way the notification
+    // function will always think there is a change (as we are about to delete
+    // this key).
+    this->valueChangeCallbackWrapper(key, this->tree_depth, true,
+                                     leaf->getLogOdds(), this->isNodeOccupied(leaf),
+                                     this->clamping_thres_min, false);
+    deleteNode(key);
+    return NULL;
+  }
   // no change: node already at threshold
   if (leaf
       && ((log_odds_update >= 0 && leaf->getLogOdds() >= this->clamping_thres_max)

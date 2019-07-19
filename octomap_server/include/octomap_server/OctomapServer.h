@@ -440,6 +440,7 @@ protected:
   double m_colorFactor;
 
   bool m_latchedTopics;
+  bool m_trackFreeSpace;
   bool m_publishFreeSpace;
   bool m_newFullSub;
   bool m_newBinarySub;

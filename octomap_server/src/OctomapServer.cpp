@@ -55,6 +55,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_useColoredMap(false),
   m_colorFactor(0.8),
   m_latchedTopics(true),
+  m_trackFreeSpace(true),
   m_publishFreeSpace(false),
   m_publish3DMapPeriod(0.0),
   m_publish2DPeriod(0.0),
@@ -240,6 +241,9 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_colorFree.g = g;
   m_colorFree.b = b;
   m_colorFree.a = a;
+
+  m_nh_private.param("track_free_space", m_trackFreeSpace, m_trackFreeSpace);
+  m_octree->setDeleteMinimum(!m_trackFreeSpace);
 
   m_nh_private.param("publish_free_space", m_publishFreeSpace, m_publishFreeSpace);
   m_nh_private.param("publish_3d_map_period", m_publish3DMapPeriod, m_publish3DMapPeriod);

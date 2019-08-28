@@ -580,49 +580,70 @@ void OctomapServer::insertSegmentedCloudCallback(
   Eigen::Matrix4f sensorToWorld;
   pcl_ros::transformAsMatrix(sensorToWorldTf, sensorToWorld);
 
-  // set up filter for height range, also removes NANs:
-  pcl::PassThrough<PCLPoint> pass_x;
-  pass_x.setFilterFieldName("x");
-  pass_x.setFilterLimits(m_pointcloudMinX, m_pointcloudMaxX);
-  pcl::PassThrough<PCLPoint> pass_y;
-  pass_y.setFilterFieldName("y");
-  pass_y.setFilterLimits(m_pointcloudMinY, m_pointcloudMaxY);
-  pcl::PassThrough<PCLPoint> pass_z;
-  pass_z.setFilterFieldName("z");
-  pass_z.setFilterLimits(m_pointcloudMinZ, m_pointcloudMaxZ);
+  bool filter_x = false;
+  bool filter_y = false;
+  bool filter_z = false;
+
+  if (m_pointcloudMinX > -1.0e37 || m_pointcloudMaxX < 1.0e37)
+  {
+    filter_x = true;
+  }
+  if (m_pointcloudMinY > -1.0e37 || m_pointcloudMaxY < 1.0e37)
+  {
+    filter_y = true;
+  }
+  if (m_pointcloudMinZ > -1.0e37 || m_pointcloudMaxZ < 1.0e37)
+  {
+    filter_z = true;
+  }
 
   // directly transform to map frame:
   pcl::transformPointCloud(pc_ground, pc_ground, sensorToWorld);
   pcl::transformPointCloud(pc_nonground, pc_nonground, sensorToWorld);
   pcl::transformPointCloud(pc_nonclearing_nonground, pc_nonclearing_nonground, sensorToWorld);
 
-  pass_x.setInputCloud(pc_ground.makeShared());
-  pass_x.filter(pc_ground);
-  pass_y.setInputCloud(pc_ground.makeShared());
-  pass_y.filter(pc_ground);
-  pass_z.setInputCloud(pc_ground.makeShared());
-  pass_z.filter(pc_ground);
-
-  pass_x.setInputCloud(pc_nonground.makeShared());
-  pass_x.filter(pc_nonground);
-  pass_y.setInputCloud(pc_nonground.makeShared());
-  pass_y.filter(pc_nonground);
-  pass_z.setInputCloud(pc_nonground.makeShared());
-  pass_z.filter(pc_nonground);
-
-  pass_x.setInputCloud(pc_nonclearing_nonground.makeShared());
-  pass_x.filter(pc_nonclearing_nonground);
-  pass_y.setInputCloud(pc_nonclearing_nonground.makeShared());
-  pass_y.filter(pc_nonclearing_nonground);
-  pass_z.setInputCloud(pc_nonclearing_nonground.makeShared());
-  pass_z.filter(pc_nonclearing_nonground);
-
-  pass_x.setInputCloud(pc_nonmarking_nonground.makeShared());
-  pass_x.filter(pc_nonmarking_nonground);
-  pass_y.setInputCloud(pc_nonmarking_nonground.makeShared());
-  pass_y.filter(pc_nonmarking_nonground);
-  pass_z.setInputCloud(pc_nonmarking_nonground.makeShared());
-  pass_z.filter(pc_nonmarking_nonground);
+  if (filter_x)
+  {
+    pcl::PassThrough<PCLPoint> pass_x;
+    pass_x.setFilterFieldName("x");
+    pass_x.setFilterLimits(m_pointcloudMinX, m_pointcloudMaxX);
+    pass_x.setInputCloud(pc_ground.makeShared());
+    pass_x.filter(pc_ground);
+    pass_x.setInputCloud(pc_nonground.makeShared());
+    pass_x.filter(pc_nonground);
+    pass_x.setInputCloud(pc_nonclearing_nonground.makeShared());
+    pass_x.filter(pc_nonclearing_nonground);
+    pass_x.setInputCloud(pc_nonmarking_nonground.makeShared());
+    pass_x.filter(pc_nonmarking_nonground);
+  }
+  if (filter_y)
+  {
+    pcl::PassThrough<PCLPoint> pass_y;
+    pass_y.setFilterFieldName("y");
+    pass_y.setFilterLimits(m_pointcloudMinY, m_pointcloudMaxY);
+    pass_y.setInputCloud(pc_ground.makeShared());
+    pass_y.filter(pc_ground);
+    pass_y.setInputCloud(pc_nonground.makeShared());
+    pass_y.filter(pc_nonground);
+    pass_y.setInputCloud(pc_nonclearing_nonground.makeShared());
+    pass_y.filter(pc_nonclearing_nonground);
+    pass_y.setInputCloud(pc_nonmarking_nonground.makeShared());
+    pass_y.filter(pc_nonmarking_nonground);
+  }
+  if (filter_z)
+  {
+    pcl::PassThrough<PCLPoint> pass_z;
+    pass_z.setFilterFieldName("z");
+    pass_z.setFilterLimits(m_pointcloudMinZ, m_pointcloudMaxZ);
+    pass_z.setInputCloud(pc_ground.makeShared());
+    pass_z.filter(pc_ground);
+    pass_z.setInputCloud(pc_nonground.makeShared());
+    pass_z.filter(pc_nonground);
+    pass_z.setInputCloud(pc_nonclearing_nonground.makeShared());
+    pass_z.filter(pc_nonclearing_nonground);
+    pass_z.setInputCloud(pc_nonmarking_nonground.makeShared());
+    pass_z.filter(pc_nonmarking_nonground);
+  }
 
   insertScan(sensorOriginTf.getOrigin(), pc_ground, pc_nonground, pc_nonclearing_nonground, pc_nonmarking_nonground);
 

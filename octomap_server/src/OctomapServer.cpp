@@ -819,6 +819,44 @@ void OctomapServer::handleRayPoint(SensorUpdateKeyMap* update_cells,
   double post_mark_cells = 2.0;
   octomap::OcTreeKey furthest_key;
 
+  // If discrete is enabled, pre-voxel-filter all points using a hash table of
+  // octree cells (known as OcTreeKey in octomap). This speeds up performance
+  // of fast sensors with normal FoV within the bounds of the update as
+  // certain math can be skipped prior to checking the actual ray-trace
+  // endpoints (because we trace only to the bounds of the update). This does
+  // not speed up sensors as much whose endpoints are often out of the FoV, as
+  // the math often has to be done to find the adjusted end point prior to
+  // voxel filtering.
+  if (discrete)
+  {
+    octomap::OcTreeKey point_key = m_octree->coordToKey(point);
+    octomap::OcTreeKey::KeyHash hasher;
+    size_t key_hash = hasher(point_key);
+    SensorUpdateKeyMap::iterator it = m_voxelFilter.find(point_key, key_hash);
+    if (it != m_voxelFilter.end())
+    {
+      bool was_occupied = it->value;
+      if (was_occupied || !occupied)
+      {
+        // Discrete is set and we have already processed this point this
+        // update cycle and the old point was occupied or the new point is not
+        // ocupied. Nothing more to do.
+        return;
+      }
+      else
+      {
+        // Else, the point was not occupied (yet we have seen it) and the new
+        // point is occupied. Change the voxel memory to occupied.
+        it->value = true;
+      }
+    }
+    else
+    {
+      // Memorize this voxel as being used.
+      m_voxelFilter.insert(point_key, key_hash, occupied);
+    }
+  }
+
   if (free)
   {
     // clear all the way to the end point
@@ -842,6 +880,8 @@ void OctomapServer::applyUpdate()
   }
   // clear stored update
   m_updateCells.clear();
+  // clear stored voxel filter
+  m_voxelFilter.clear();
 }
 
 void OctomapServer::publishAll(const ros::Time& rostime){

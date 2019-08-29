@@ -115,12 +115,12 @@ public:
 
   class iterator {
     public:
-      iterator(const SensorUpdateKeyMap& key_set, size_t table_index, const Node *node)
+      iterator(SensorUpdateKeyMap& key_set, size_t table_index, Node *node)
         : key_map_(key_set), table_index_(table_index), node_(node) {}
       iterator(const iterator& rhs)
         : key_map_(rhs.key_map_), table_index_(rhs.table_index_), node_(rhs.node_) {}
-      const Node& operator*() { return *node_; }
-      const Node* operator->() { return node_; }
+      Node& operator*() { return *node_; }
+      Node* operator->() { return node_; }
       operator bool() const { return node_ != NULL; }
       bool operator==(const iterator& rhs) { return node_ == rhs.node_; }
       bool operator!=(const iterator& rhs) { return !operator==(rhs); }
@@ -151,9 +151,9 @@ public:
         return rv;
       }
     protected:
-      const SensorUpdateKeyMap &key_map_;
+      SensorUpdateKeyMap &key_map_;
       size_t table_index_;
-      const Node *node_;
+      Node *node_;
   };
 
   iterator find(const octomap::OcTreeKey& key);

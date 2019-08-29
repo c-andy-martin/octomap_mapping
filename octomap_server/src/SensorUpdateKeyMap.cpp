@@ -100,6 +100,11 @@ SensorUpdateKeyMap::iterator SensorUpdateKeyMap::find(const octomap::OcTreeKey& 
 {
   octomap::OcTreeKey::KeyHash hasher;
   size_t hash = hasher(key);
+  return find(key, hash);
+}
+
+SensorUpdateKeyMap::iterator SensorUpdateKeyMap::find(const octomap::OcTreeKey& key, size_t hash)
+{
   size_t index = hash % table_.size();
   SensorUpdateKeyMap::Node *node = table_[index];
   while (node) {
@@ -516,10 +521,14 @@ bool SensorUpdateKeyMap::insertOccupied(octomap::OcTreeKey& key)
 // Returns true if a node was inserted, false if the node already existed
 bool SensorUpdateKeyMap::insert(const octomap::OcTreeKey& key, bool value)
 {
-  if (isKeyOutOfBounds(key)) return false;
-
   octomap::OcTreeKey::KeyHash hasher;
   size_t hash = hasher(key);
+  return insert(key, hash, value);
+}
+
+bool SensorUpdateKeyMap::insert(const octomap::OcTreeKey& key, size_t hash, bool value)
+{
+  if (isKeyOutOfBounds(key)) return false;
   size_t index = hash % table_.size();
   SensorUpdateKeyMap::Node *node = table_[index];
   while (node) {

@@ -422,7 +422,7 @@ bool SensorUpdateKeyMap::insertRay(const OcTreeT& tree,
               skip_tracing = true;
             }
           }
-          if (!discrete || !inserted)
+          if (!discrete || inserted)
           {
             if (end_occupied && post_mark_cells > 0.0)
             {

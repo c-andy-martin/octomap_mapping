@@ -693,13 +693,6 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   updateMinKey(originKey, m_updateBBXMin);
   updateMaxKey(originKey, m_updateBBXMax);
 
-  // insert ground points only as free:
-  for (PCLPointCloud::const_iterator it = ground.begin(); it != ground.end(); ++it)
-  {
-    point3d point(it->x, it->y, it->z);
-    handleRayPoint(&m_updateCells, sensorOrigin, point, true, false, false);
-  }
-
   // insert non-ground points: free on ray, occupied on endpoint:
   for (PCLPointCloud::const_iterator it = nonground.begin(); it != nonground.end(); ++it)
   {
@@ -707,11 +700,11 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
     handleRayPoint(&m_updateCells, sensorOrigin, point, false, true, false);
   }
 
-  // insert non-clearing, non-ground points: occupied only on endpoint:
-  for (PCLPointCloud::const_iterator it = nonclearing_nonground.begin(); it != nonclearing_nonground.end(); ++it)
+  // insert ground points only as free, clearing up to them:
+  for (PCLPointCloud::const_iterator it = ground.begin(); it != ground.end(); ++it)
   {
     point3d point(it->x, it->y, it->z);
-    handleRayPoint(&m_updateCells, sensorOrigin, point, false, true, true);
+    handleRayPoint(&m_updateCells, sensorOrigin, point, true, false, false);
   }
 
   // insert non-marking, non-ground points: do not touch endpoint, clear ray
@@ -719,6 +712,13 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   {
     point3d point(it->x, it->y, it->z);
     handleRayPoint(&m_updateCells, sensorOrigin, point, false, false, false);
+  }
+
+  // insert non-clearing, non-ground points: occupied only on endpoint:
+  for (PCLPointCloud::const_iterator it = nonclearing_nonground.begin(); it != nonclearing_nonground.end(); ++it)
+  {
+    point3d point(it->x, it->y, it->z);
+    handleRayPoint(&m_updateCells, sensorOrigin, point, false, true, true);
   }
 
   if (!m_deferUpdateToPublish)

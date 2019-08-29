@@ -97,6 +97,7 @@ public:
   // and want a voxel with both a ground and non-ground point to be always
   // counted as occupeid.
   bool insert(const octomap::OcTreeKey& key, bool value = false);
+  bool insert(const octomap::OcTreeKey& key, size_t hash, bool value = false);
 
   // Insert from any container of OcTreeKey's
   // This will only insert clear space (value is always false)
@@ -156,6 +157,7 @@ public:
   };
 
   iterator find(const octomap::OcTreeKey& key);
+  iterator find(const octomap::OcTreeKey& key, size_t hash);
   iterator begin();
   iterator end();
 

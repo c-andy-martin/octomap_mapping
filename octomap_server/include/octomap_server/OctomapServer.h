@@ -504,6 +504,7 @@ protected:
   ros::Time m_expireLastTime;
 
   // efficient sensor update tracking
+  SensorUpdateKeyMap m_voxelFilter;
   SensorUpdateKeyMap m_updateCells;
   bool m_deferUpdateToPublish;
 

@@ -820,8 +820,8 @@ void OctomapServer::handleRayPoint(SensorUpdateKeyMap* update_cells,
 
   if (free)
   {
+    // clear all the way to the end point
     ray_shrink_cells = 0.0;
-    post_mark_cells = 0.0;
   }
 
   if (update_cells->insertRay(*m_octree, sensor_origin, point, discrete,

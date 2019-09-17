@@ -45,6 +45,7 @@ add_library(${PROJECT_NAME}
   src/OctomapServer.cpp
   src/OctomapServerMultilayer.cpp
   src/TrackingOctomapServer.cpp
+  src/PointCloudSynchronizer.cpp
   src/SensorUpdateKeyMap.cpp
   src/OcTreeStampedWithExpiry.cpp
 )

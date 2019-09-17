@@ -317,13 +317,9 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
           }
         }
       }
-      if (!ground_topic.empty() && !nonground_topic.empty()) {
-        addSegmentedCloudTopic(ground_topic, nonground_topic,
-                               nonclearing_nonground_topic, nonmarking_nonground_topic,
-                               sensor_origin_frame_id);
-      } else {
-        ROS_WARN("In current implementation segmented topics must have both ground and nonground topics");
-      }
+      addSegmentedCloudTopic(ground_topic, nonground_topic,
+                             nonclearing_nonground_topic, nonmarking_nonground_topic,
+                             sensor_origin_frame_id);
     }
   }
 
@@ -348,10 +344,8 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
 }
 
 OctomapServer::~OctomapServer(){
-  // Because time synchronizers reference TF filters, delete them first
-  m_sync2s.clear();
-  m_sync3s.clear();
-  m_sync4s.clear();
+  // Because time synchronizers reference the TF listeners, delete them first
+  m_syncs.clear();
   // Because TF message filters reference the subscriber, deleted them next
   m_tfPointCloudSubs.clear();
   m_pointCloudSubs.clear();
@@ -522,6 +516,46 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr
 }
 
 void OctomapServer::insertSegmentedCloudCallback(
+    PointCloudSynchronizer::MsgTopicVectorConstPtr msgs_and_topics,
+    const std::string& sensor_origin_frame_id,
+    unsigned int callback_id)
+{
+  sensor_msgs::PointCloud2::ConstPtr ground_cloud;
+  sensor_msgs::PointCloud2::ConstPtr nonground_cloud;
+  sensor_msgs::PointCloud2::ConstPtr nonclearing_nonground_cloud;
+  sensor_msgs::PointCloud2::ConstPtr nonmarking_nonground_cloud;
+
+  PointCloudSynchronizer::MsgTopicConstVector::const_iterator it;
+  for (it = msgs_and_topics->cbegin(); it != msgs_and_topics->cend(); ++it)
+  {
+    if (*((*it)->second) == m_callbackTopics[callback_id][0])
+    {
+      ground_cloud = (*it)->first;
+    }
+    else if (*((*it)->second) == m_callbackTopics[callback_id][1])
+    {
+      nonground_cloud = (*it)->first;
+    }
+    else if (*((*it)->second) == m_callbackTopics[callback_id][2])
+    {
+      nonclearing_nonground_cloud = (*it)->first;
+    }
+    else if (*((*it)->second) == m_callbackTopics[callback_id][3])
+    {
+      nonmarking_nonground_cloud = (*it)->first;
+    }
+  }
+
+  this->insertSegmentedCloudCallback(
+      ground_cloud,
+      nonground_cloud,
+      nonclearing_nonground_cloud,
+      nonmarking_nonground_cloud,
+      sensor_origin_frame_id,
+      callback_id);
+}
+
+void OctomapServer::insertSegmentedCloudCallback(
     const sensor_msgs::PointCloud2::ConstPtr& ground_cloud,
     const sensor_msgs::PointCloud2::ConstPtr& nonground_cloud,
     const sensor_msgs::PointCloud2::ConstPtr& nonclearing_nonground_cloud,
@@ -543,21 +577,54 @@ void OctomapServer::insertSegmentedCloudCallback(
   PCLPointCloud pc_nonground;
   PCLPointCloud pc_nonclearing_nonground;
   PCLPointCloud pc_nonmarking_nonground;
-  pcl::fromROSMsg(*ground_cloud, pc_ground);
-  pcl::fromROSMsg(*nonground_cloud, pc_nonground);
+  bool first_cloud = true;
+  ros::Time first_cloud_stamp;
+  std::string first_cloud_frame;
+  if (ground_cloud)
+  {
+    pcl::fromROSMsg(*ground_cloud, pc_ground);
+    if (first_cloud)
+    {
+      first_cloud = false;
+      first_cloud_stamp = ground_cloud->header.stamp;
+      first_cloud_frame = ground_cloud->header.frame_id;
+    }
+  }
+  if (nonground_cloud)
+  {
+    pcl::fromROSMsg(*nonground_cloud, pc_nonground);
+    if (first_cloud)
+    {
+      first_cloud = false;
+      first_cloud_stamp = nonground_cloud->header.stamp;
+      first_cloud_frame = nonground_cloud->header.frame_id;
+    }
+  }
   if (nonclearing_nonground_cloud)
   {
     pcl::fromROSMsg(*nonclearing_nonground_cloud, pc_nonclearing_nonground);
+    if (first_cloud)
+    {
+      first_cloud = false;
+      first_cloud_stamp = nonclearing_nonground_cloud->header.stamp;
+      first_cloud_frame = nonclearing_nonground_cloud->header.frame_id;
+    }
   }
   if (nonmarking_nonground_cloud)
   {
     pcl::fromROSMsg(*nonmarking_nonground_cloud, pc_nonmarking_nonground);
+    if (first_cloud)
+    {
+      first_cloud = false;
+      first_cloud_stamp = nonmarking_nonground_cloud->header.stamp;
+      first_cloud_frame = nonmarking_nonground_cloud->header.frame_id;
+    }
   }
 
   if (m_baseDistanceLimitPeriod > 0.0){
     try{
-      m_tfListener.waitForTransform(m_worldFrameId, m_baseFrameId, nonground_cloud->header.stamp, ros::Duration(0.2));
-      m_tfListener.lookupTransform(m_worldFrameId, m_baseFrameId, nonground_cloud->header.stamp, m_baseToWorldTf);
+      m_tfListener.waitForTransform(m_worldFrameId, m_baseFrameId, first_cloud_stamp, ros::Duration(0.2));
+      m_tfListener.lookupTransform(m_worldFrameId, m_baseFrameId, first_cloud_stamp, m_baseToWorldTf);
       m_baseToWorldValid = true;
     }catch(tf::TransformException& ex){
       ROS_ERROR_STREAM("Transform error when finding base to world transform: " << ex.what());
@@ -568,9 +635,9 @@ void OctomapServer::insertSegmentedCloudCallback(
   tf::StampedTransform sensorOriginTf;
   // Assume exact time-synchronization, only lookup one TF
   try {
-    m_tfListener.lookupTransform(m_worldFrameId, nonground_cloud->header.frame_id, nonground_cloud->header.stamp, sensorToWorldTf);
-    std::string sensor_origin_frame = sensor_origin_frame_id.size() ? sensor_origin_frame_id : nonground_cloud->header.frame_id;
-    m_tfListener.lookupTransform(m_worldFrameId, sensor_origin_frame, nonground_cloud->header.stamp, sensorOriginTf);
+    m_tfListener.lookupTransform(m_worldFrameId, first_cloud_frame, first_cloud_stamp, sensorToWorldTf);
+    std::string sensor_origin_frame = sensor_origin_frame_id.size() ? sensor_origin_frame_id : first_cloud_frame;
+    m_tfListener.lookupTransform(m_worldFrameId, sensor_origin_frame, first_cloud_stamp, sensorOriginTf);
   } catch(tf::TransformException& ex){
     ROS_ERROR_STREAM( "Transform error of sensor data: " << ex.what() << ", quitting callback");
     return;
@@ -600,6 +667,7 @@ void OctomapServer::insertSegmentedCloudCallback(
   pcl::transformPointCloud(pc_ground, pc_ground, sensorToWorld);
   pcl::transformPointCloud(pc_nonground, pc_nonground, sensorToWorld);
   pcl::transformPointCloud(pc_nonclearing_nonground, pc_nonclearing_nonground, sensorToWorld);
+  pcl::transformPointCloud(pc_nonmarking_nonground, pc_nonmarking_nonground, sensorToWorld);
 
   if (filter_x)
   {
@@ -649,7 +717,7 @@ void OctomapServer::insertSegmentedCloudCallback(
   double total_elapsed = (ros::WallTime::now() - startTime).toSec();
   ROS_DEBUG("Pointcloud insertion in OctomapServer done (%zu+%zu pts (ground/nonground), %f sec)", pc_ground.size(), pc_nonground.size(), total_elapsed);
 
-  publishAll(nonground_cloud->header.stamp);
+  publishAll(first_cloud_stamp);
 }
 
 void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCloud& ground,

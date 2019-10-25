@@ -410,7 +410,8 @@ bool SensorUpdateKeyMap::insertRay(const OcTreeT& tree,
         if (!isKeyOutOfBounds(end_key))
         {
           bool inserted = false;
-          if (insert(end_key, end_occupied))
+          // call insertOccupied/insertFree so floor truncation works if enabled
+          if (end_occupied && insertOccupied(end_key) || !end_occupied && insertFree(end_key))
           {
             inserted = true;
             cells_added = true;

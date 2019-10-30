@@ -338,7 +338,7 @@ bool SensorUpdateKeyMap::insertFreeRay(const OcTreeT& tree,
 
 bool SensorUpdateKeyMap::insertRay(const OcTreeT& tree,
                                    const octomap::point3d& origin,
-                                   const octomap::point3d& end,
+                                   octomap::point3d end,
                                    bool discrete,
                                    bool end_free,
                                    bool end_occupied,
@@ -349,7 +349,7 @@ bool SensorUpdateKeyMap::insertRay(const OcTreeT& tree,
                                    octomap::OcTreeKey* furthest_touched_key)
 {
   bool cells_added = false;
-  octomap::OcTreeKey origin_key, end_key, adjusted_end_key;
+  octomap::OcTreeKey origin_key, end_key;
   if (!tree.coordToKeyChecked(origin, origin_key))
   {
     // origin key is not in the tree
@@ -366,35 +366,63 @@ bool SensorUpdateKeyMap::insertRay(const OcTreeT& tree,
   const octomap::point3d direction = ray.normalized();
 
   // Find the adjusted ray trace end point.
-  octomap::point3d adjusted_end = end;
-  // Adjust the end first for ray_shrink_cells
-  if (ray_shrink_cells > 0.0)
   {
-    const double ray_shrink_length = ray_shrink_cells * tree.getResolution();
-    if (ray.norm() <= ray_shrink_length)
+    octomap::point3d adjusted_end = end;
+    octomap::OcTreeKey adjusted_end_key;
+    // Adjust the end first for ray_shrink_cells
+    if (ray_shrink_cells > 0.0)
     {
-      // Our ray will shrink to nothing. Nothing left to do.
-      return false;
+      const double ray_shrink_length = ray_shrink_cells * tree.getResolution();
+      if (ray.norm() <= ray_shrink_length)
+      {
+        // Our ray will shrink to nothing. Nothing left to do.
+        return false;
+      }
+      adjusted_end -= direction * ray_shrink_length;
     }
-    adjusted_end -= direction * ray_shrink_length;
+
+    // Next, adjust for max range
+    if (max_range > 0.0 && (adjusted_end - origin).norm() > max_range)
+    {
+      adjusted_end = origin + direction * max_range;
+    }
+
+    // Finally, adjust the end to the bounds.
+    clampRayToBounds(tree, origin, &adjusted_end);
+
+    end_key = tree.coordToKey(end);
+    adjusted_end_key = tree.coordToKey(adjusted_end);
+    assert(!isKeyOutOfBounds(adjusted_end_key));
+
+    if (end_occupied && isKeyOutOfBounds(end_key))
+    {
+      // The original end is beyond the bounds.
+      if (truncate_floor_ && end_key[2] < truncate_floor_z_ && adjusted_end_key[2] <= truncate_floor_z_)
+      {
+        // We are truncating the floor, the original end is below the floor and
+        // the adjusted end is within one resolution unit of the floor.
+        // In such a case, we want to mark the end as a cliff-like obstacle
+        // because floor truncation is on, so do not clear end_occupied.
+      }
+      else
+      {
+        // The original obstacle is out-of-bounds, so pretend this is a
+        // clear-ray instead of an occupied one.
+        end_free = true;
+        end_occupied = false;
+      }
+    }
+
+    // Update the end
+    end = adjusted_end;
+    end_key = adjusted_end_key;
   }
-
-  // Next, adjust for max range
-  if (max_range > 0.0 && (adjusted_end - origin).norm() > max_range)
-  {
-    adjusted_end = origin + direction * max_range;
-  }
-
-  // Finally, adjust the end to the bounds.
-  clampRayToBounds(tree, origin, &adjusted_end);
-
-  adjusted_end_key = tree.coordToKey(adjusted_end);
-  assert(!isKeyOutOfBounds(adjusted_end_key));
+  assert(!isKeyOutOfBounds(end_key));
 
   // Check the adjusted end before marking or clearing the end point to correctly apply discrete.
   if (discrete)
   {
-    if (find(adjusted_end_key) != this->end())
+    if (find(end_key) != this->end())
     {
       // ray tracing endpoint already in update, skip ray-tracing.
       skip_tracing = true;
@@ -468,11 +496,11 @@ bool SensorUpdateKeyMap::insertRay(const OcTreeT& tree,
 
   if (!skip_tracing)
   {
-    if (insertFreeRay(tree, origin, adjusted_end))
+    if (insertFreeRay(tree, origin, end))
     {
       if (!cells_added && furthest_touched_key)
       {
-        *furthest_touched_key = tree.coordToKey(adjusted_end);
+        *furthest_touched_key = end_key;
       }
       cells_added = true;
     }

@@ -80,7 +80,7 @@ public:
    */
   bool insertRay(const OcTreeT& tree,
                  const octomap::point3d& origin,
-                 const octomap::point3d& end,
+                 octomap::point3d end,
                  bool discrete=false,
                  bool end_free=false,
                  bool end_occupied=false,

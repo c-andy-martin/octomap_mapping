@@ -1449,7 +1449,7 @@ void OctomapServer::onNewBinaryMapUpdateSubscription(const ros::SingleSubscriber
   publishBinaryOctoMapUpdate(ros::Time::now(), &pub);
 }
 
-void OctomapServer::publishBinaryOctoMapUpdate(const ros::Time& rostime, const ros::SingleSubscriberPublisher* pub /* =  nullptr */) const{
+void OctomapServer::publishBinaryOctoMapUpdate(const ros::Time& rostime, const ros::SingleSubscriberPublisher* pub /* =  nullptr */) {
 
   octomap_msgs::OctomapUpdatePtr map_msg_ptr(new octomap_msgs::OctomapUpdate());
   octomap_msgs::OctomapUpdate& map_msg = *map_msg_ptr;
@@ -1458,15 +1458,24 @@ void OctomapServer::publishBinaryOctoMapUpdate(const ros::Time& rostime, const r
   // Set up header info
   map_msg.header.frame_id = m_worldFrameId;
   map_msg.header.stamp = rostime;
+  map_msg.octomap_bounds.header.seq = m_binarySeq;
   map_msg.octomap_bounds.header.frame_id = m_worldFrameId;
   map_msg.octomap_bounds.header.stamp = rostime;
+  map_msg.octomap_update.header.seq = m_binarySeq;
   map_msg.octomap_update.header.frame_id = m_worldFrameId;
   map_msg.octomap_update.header.stamp = rostime;
 
   OcTreeT* bounds_map_ptr = m_octree_binary_deltaBB_;
   if (pub)
   {
+    // new subscription, force full publish, set seq unequal for sentinel
     bounds_map_ptr = m_universe;
+    map_msg.octomap_update.header.seq--;
+  }
+  else
+  {
+    // publishing normally, increment our seq
+    m_binarySeq++;
   }
 
   delta_map.setTreeValues(m_octree, bounds_map_ptr, false, false);
@@ -1490,7 +1499,7 @@ void OctomapServer::publishBinaryOctoMapUpdate(const ros::Time& rostime, const r
   }
 }
 
-void OctomapServer::publishFullOctoMapUpdate(const ros::Time& rostime, const ros::SingleSubscriberPublisher* pub /* =  nullptr */) const{
+void OctomapServer::publishFullOctoMapUpdate(const ros::Time& rostime, const ros::SingleSubscriberPublisher* pub /* =  nullptr */) {
 
   octomap_msgs::OctomapUpdatePtr map_msg_ptr(new octomap_msgs::OctomapUpdate());
   octomap_msgs::OctomapUpdate& map_msg = *map_msg_ptr;
@@ -1499,15 +1508,24 @@ void OctomapServer::publishFullOctoMapUpdate(const ros::Time& rostime, const ros
   // Set up header info
   map_msg.header.frame_id = m_worldFrameId;
   map_msg.header.stamp = rostime;
+  map_msg.octomap_bounds.header.seq = m_fullSeq;
   map_msg.octomap_bounds.header.frame_id = m_worldFrameId;
   map_msg.octomap_bounds.header.stamp = rostime;
+  map_msg.octomap_update.header.seq = m_fullSeq;
   map_msg.octomap_update.header.frame_id = m_worldFrameId;
   map_msg.octomap_update.header.stamp = rostime;
 
   OcTreeT* bounds_map_ptr = m_octree_deltaBB_;
   if (pub)
   {
+    // new subscription, force full publish, set seq unequal for sentinel
     bounds_map_ptr = m_universe;
+    map_msg.octomap_update.header.seq--;
+  }
+  else
+  {
+    // publishing normally, increment our seq
+    m_fullSeq++;
   }
 
   delta_map.setTreeValues(m_octree, bounds_map_ptr, false, false);

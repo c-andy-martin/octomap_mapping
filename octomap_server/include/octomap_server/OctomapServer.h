@@ -197,11 +197,11 @@ protected:
   void onNewBinaryMapSubscription(const ros::SingleSubscriberPublisher& pub);
   void onNewBinaryMapUpdateSubscription(const ros::SingleSubscriberPublisher& pub);
   void publishBinaryOctoMapUpdate(const ros::Time& rostime = ros::Time::now(),
-      const ros::SingleSubscriberPublisher* pub =  nullptr) const;
+      const ros::SingleSubscriberPublisher* pub =  nullptr);
   void onNewFullMapSubscription(const ros::SingleSubscriberPublisher& pub);
   void onNewFullMapUpdateSubscription(const ros::SingleSubscriberPublisher& pub);
   void publishFullOctoMapUpdate(const ros::Time& rostime = ros::Time::now(),
-      const ros::SingleSubscriberPublisher* pub = nullptr) const;
+      const ros::SingleSubscriberPublisher* pub = nullptr);
   virtual void publishAll(const ros::Time& rostime = ros::Time::now());
 
   /**
@@ -332,6 +332,8 @@ protected:
   bool m_publishFreeSpace;
   bool m_newFullSub;
   bool m_newBinarySub;
+  uint32_t m_binarySeq;
+  uint32_t m_fullSeq;
   double m_publish3DMapPeriod;
   ros::Time m_publish3DMapLastTime;
   double m_publish3DMapUpdatePeriod;

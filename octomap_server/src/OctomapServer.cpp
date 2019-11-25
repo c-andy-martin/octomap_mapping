@@ -990,10 +990,6 @@ void OctomapServer::publishAll(const ros::Time& rostime){
   ros::WallTime startTime = ros::WallTime::now();
   size_t octomapSize = m_octree->size();
   // TODO: estimate num occ. voxels for size of arrays (reserve)
-  if (octomapSize == 0){
-    ROS_WARN("Nothing to publish, octree is empty");
-    return;
-  }
 
   bool publishFreeMarkerArray = m_publishFreeSpace && (m_latchedTopics || m_fmarkerPub.getNumSubscribers() > 0);
   bool publishMarkerArray = (m_latchedTopics || m_markerPub.getNumSubscribers() > 0);

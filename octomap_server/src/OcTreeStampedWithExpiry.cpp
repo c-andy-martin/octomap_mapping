@@ -38,7 +38,7 @@ void OcTreeStampedWithExpiry::expireNodes(NodeChangeNotification change_notifica
       {
         change_notification(rootKey, 0);
       }
-      delete root;
+      this->deleteNodeRecurs(root);
       root = NULL;
       expire_count++;
     }
@@ -216,7 +216,7 @@ OcTreeNodeStampedWithExpiry* OcTreeStampedWithExpiry::updateNode(const octomap::
 
   bool createdRoot = false;
   if (this->root == NULL) {
-    this->root = new OcTreeNodeStampedWithExpiry();
+    this->root = this->allocNode();
     this->tree_size++;
     createdRoot = true;
   }

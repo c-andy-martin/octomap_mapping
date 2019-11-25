@@ -171,7 +171,6 @@ bool SensorUpdateKeyMap::insertFreeCells(const octomap::OcTreeKey *free_cells, s
     doubleCapacity();
   }
   const size_t n = ((free_cells_count-1) & ~7) + 8;
-  const size_t tn = table_.size();
   size_t x_keys[n] __attribute__((__aligned__(64)));
   size_t y_keys[n] __attribute__((__aligned__(64)));
   size_t z_keys[n] __attribute__((__aligned__(64)));

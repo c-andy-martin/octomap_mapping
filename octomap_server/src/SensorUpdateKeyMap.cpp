@@ -370,25 +370,21 @@ bool SensorUpdateKeyMap::insertRay(const OcTreeT& tree,
   {
     octomap::point3d adjusted_end = end;
     octomap::OcTreeKey adjusted_end_key;
-    // Adjust the end first for ray_shrink_cells
-    if (ray_shrink_cells > 0.0)
-    {
-      const double ray_shrink_length = ray_shrink_cells * tree.getResolution();
-      if (ray.norm() <= ray_shrink_length)
-      {
-        // Our ray will shrink to nothing. Nothing left to do.
-        return false;
-      }
-      adjusted_end -= direction * ray_shrink_length;
-    }
 
-    // Next, adjust for max range
+    // Adjust for max range
     if (max_range > 0.0 && (adjusted_end - origin).norm() > max_range)
     {
       adjusted_end = origin + direction * max_range;
+      if (end_occupied)
+      {
+        // The original obstacle is out-of-bounds, so pretend this is a
+        // clear-ray instead of an occupied one.
+        end_free = true;
+        end_occupied = false;
+      }
     }
 
-    // Finally, adjust the end to the bounds.
+    // Adjust the end to the bounds.
     clampRayToBounds(tree, origin, &adjusted_end);
 
     end_key = tree.coordToKey(end);
@@ -412,6 +408,16 @@ bool SensorUpdateKeyMap::insertRay(const OcTreeT& tree,
         end_free = true;
         end_occupied = false;
       }
+    }
+
+    // If the end voxel key has changed, there is no need to shrink the ray by
+    // ray shrink cells. While this may mean we clear a bit extra if we were
+    // within one voxel of the boundary, it is not worth the extra calculation
+    // to adjust ray shrink cells in the small chance it overlapped. Simply
+    // turn it off if the end was moved.
+    if (end_key != adjusted_end_key)
+    {
+      ray_shrink_cells = 0.0;
     }
 
     // Update the end
@@ -469,21 +475,24 @@ bool SensorUpdateKeyMap::insertRay(const OcTreeT& tree,
               for (unsigned int step=0; step<step_cnt; ++step)
               {
                 step_point += step_vector;
-                if (truncate_floor_ && step_point.z() < truncate_floor_z_) {
-                  break;
-                }
                 octomap::OcTreeKey mark_key;
                 if (tree.coordToKeyChecked(step_point, mark_key))
                 {
-                  if (!isKeyOutOfBounds(mark_key))
+                  if (truncate_floor_ && mark_key[2] < truncate_floor_z_)
                   {
-                    if (insertOccupied(mark_key))
+                    break;
+                  }
+                  if (isKeyOutOfBounds(mark_key))
+                  {
+                    break;
+                  }
+
+                  if (insertOccupied(mark_key))
+                  {
+                    cells_added = true;
+                    if (furthest_touched_key)
                     {
-                      cells_added = true;
-                      if (furthest_touched_key)
-                      {
-                        *furthest_touched_key = mark_key;
-                      }
+                      *furthest_touched_key = mark_key;
                     }
                   }
                 }
@@ -497,6 +506,21 @@ bool SensorUpdateKeyMap::insertRay(const OcTreeT& tree,
 
   if (!skip_tracing)
   {
+    // Now that marking is complete, adjust the end for ray_shrink_cells
+    if (ray_shrink_cells > 0.0)
+    {
+      const double ray_shrink_length = ray_shrink_cells * tree.getResolution();
+      if (ray.norm() <= ray_shrink_length)
+      {
+        // Our ray will shrink to nothing.
+        end = origin;
+      }
+      else
+      {
+        end -= direction * ray_shrink_length;
+      }
+    }
+
     if (insertFreeRay(tree, origin, end))
     {
       if (!cells_added && furthest_touched_key)

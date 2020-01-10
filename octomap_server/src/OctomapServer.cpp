@@ -882,8 +882,8 @@ void OctomapServer::handleRayPoint(SensorUpdateKeyMap* update_cells,
 {
   // XXX get from params
   bool discrete = true;
-  double ray_shrink_cells = 2.0;
-  double post_mark_cells = 2.0;
+  double ray_shrink_cells = 1.0;
+  double post_mark_cells = 0.0;
   octomap::OcTreeKey furthest_key;
 
   // If discrete is enabled, pre-voxel-filter all points using a hash table of

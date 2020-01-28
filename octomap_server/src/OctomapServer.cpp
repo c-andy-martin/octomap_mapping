@@ -68,6 +68,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_newBinarySub(false),
   m_res(0.05),
   m_treeDepth(0),
+  m_maxTreeDepthSetByConfig(false),
   m_maxTreeDepth(0),
   m_pointcloudMinX(-std::numeric_limits<double>::max()),
   m_pointcloudMaxX(std::numeric_limits<double>::max()),
@@ -392,7 +393,8 @@ bool OctomapServer::openFile(const std::string& filename){
   ROS_INFO("Octomap file %s loaded (%zu nodes).", filename.c_str(),m_octree->size());
 
   m_treeDepth = m_octree->getTreeDepth();
-  m_maxTreeDepth = m_treeDepth;
+  if (!m_maxTreeDepthSetByConfig)
+    m_maxTreeDepth = m_treeDepth;
   m_res = m_octree->getResolution();
   m_gridmap.info.resolution = m_res;
   double minX, minY, minZ;
@@ -800,7 +802,7 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   ROS_DEBUG_STREAM("Bounding box keys (before): " << m_updateBBXMin[0] << " " <<m_updateBBXMin[1] << " " << m_updateBBXMin[2] << " / " <<m_updateBBXMax[0] << " "<<m_updateBBXMax[1] << " "<< m_updateBBXMax[2]);
 
   // TODO: snap max / min keys to larger voxels by m_maxTreeDepth
-//   if (m_maxTreeDepth < 16)
+//   if (m_maxTreeDepth < m_treeDepth)
 //   {
 //      OcTreeKey tmpMin = getIndexKey(m_updateBBXMin, m_maxTreeDepth); // this should give us the first key at depth m_maxTreeDepth that is smaller or equal to m_updateBBXMin (i.e. lower left in 2D grid coordinates)
 //      OcTreeKey tmpMax = getIndexKey(m_updateBBXMax, m_maxTreeDepth); // see above, now add something to find upper right
@@ -1853,9 +1855,14 @@ bool OctomapServer::isSpeckleNode(const OcTreeKey&nKey) const {
 }
 
 void OctomapServer::reconfigureCallback(octomap_server::OctomapServerConfig& config, uint32_t level){
-  if (m_maxTreeDepth != unsigned(config.max_depth))
-    m_maxTreeDepth = unsigned(config.max_depth);
-  else{
+  {
+    if (config.max_depth < 0) {
+      m_maxTreeDepth = m_treeDepth;
+      m_maxTreeDepthSetByConfig = false;
+    } else {
+      m_maxTreeDepth = unsigned(config.max_depth);
+      m_maxTreeDepthSetByConfig = true;
+    }
     m_pointcloudMinZ            = config.pointcloud_min_z;
     m_pointcloudMaxZ            = config.pointcloud_max_z;
     m_occupancyMinZ             = config.occupancy_min_z;

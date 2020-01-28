@@ -846,13 +846,13 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
       tf::Vector3 origin = m_baseToWorldTf.getOrigin();
       std::stringstream ss;
       ss << "Limiting ";
-      if (m_base2DDistanceLimit < std::numeric_limits<octomap::key_type>::max()) {
+      if (m_base2DDistanceLimit < m_octree->keyToCoord(std::numeric_limits<octomap::key_type>::max())) {
         ss << "2D distance to " << m_base2DDistanceLimit;
       }
-      if (m_baseHeightLimit < std::numeric_limits<octomap::key_type>::max()) {
+      if (m_baseHeightLimit < m_octree->keyToCoord(std::numeric_limits<octomap::key_type>::max())) {
         ss << " height to " << m_baseHeightLimit;
       }
-      if (m_baseDepthLimit < std::numeric_limits<octomap::key_type>::max()) {
+      if (m_baseDepthLimit < m_octree->keyToCoord(std::numeric_limits<octomap::key_type>::max())) {
         ss << " depth to " << m_baseDepthLimit;
       }
       ss << " from (" << origin.x() << ", " << origin.y() << ", " << origin.z() << ")";

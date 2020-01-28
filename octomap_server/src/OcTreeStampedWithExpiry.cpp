@@ -56,7 +56,7 @@ bool OcTreeStampedWithExpiry::expireNodeRecurs(OcTreeNodeStampedWithExpiry* node
                                                const NodeChangeNotification& change_notification,
                                                bool delete_expired_nodes /* = true */)
 {
-  octomap::key_type center_offset_key = this->tree_max_val >> (depth + 1);
+  octomap::key_type center_offset_key = octomap::computeCenterOffsetKey(depth, this->tree_max_val);
   // We can prune our search tree using the stored expiry.
   // If we encounter an expiry of zero, that indicates a deferred calculation.
   // Calculate the expiration of such nodes as they are encountered, being

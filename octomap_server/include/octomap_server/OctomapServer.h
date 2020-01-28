@@ -343,6 +343,7 @@ protected:
 
   double m_res;
   unsigned m_treeDepth;
+  bool m_maxTreeDepthSetByConfig;
   unsigned m_maxTreeDepth;
 
   double m_pointcloudMinX;

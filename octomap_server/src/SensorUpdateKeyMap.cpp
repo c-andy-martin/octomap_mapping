@@ -23,7 +23,7 @@ void SensorUpdateKeyMap::clampRayToBounds(const OcTreeT& tree, const octomap::po
   // Find the dimension with the lowest ratio of projected length vs. actual.
   octomap::point3d direction = *end - origin;
 
-  float smallest_ratio = std::numeric_limits<typeof(direction(0))>::max();
+  double smallest_ratio = std::numeric_limits<typeof(direction(0))>::max();
   for (int i=0; i<3; i++)
   {
     if (direction(i) != 0.0)
@@ -235,7 +235,7 @@ bool SensorUpdateKeyMap::insertFreeRay(const OcTreeT& tree,
   octomap::point3d direction = (end - origin);
   octomap::point3d origin_boundary = tree.keyToCoord(origin_key);
   double resolution = tree.getResolution();
-  float length = (float) direction.norm();
+  double length = direction.norm();
   direction /= length; // normalize vector
 
   int    step[3];
@@ -261,7 +261,7 @@ bool SensorUpdateKeyMap::insertFreeRay(const OcTreeT& tree,
     if (step[i] != 0) {
       // corner point of voxel (in direction of ray)
       double voxelBorder = origin_boundary(i);
-      voxelBorder += (float) (step[i] * resolution * 0.5);
+      voxelBorder += (step[i] * resolution * 0.5);
 
       tMax[i] = ( voxelBorder - origin(i) ) / direction(i);
       tDelta[i] = resolution / fabs( direction(i) );

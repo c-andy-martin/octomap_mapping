@@ -105,7 +105,7 @@ SensorUpdateKeyMap::iterator SensorUpdateKeyMap::find(const octomap::OcTreeKey& 
 
 SensorUpdateKeyMap::iterator SensorUpdateKeyMap::find(const octomap::OcTreeKey& key, size_t hash)
 {
-  size_t index = hash % table_.size();
+  size_t index = hash & table_mask_;
   SensorUpdateKeyMap::Node *node = table_[index];
   while (node) {
     if (node->key == key) {
@@ -155,7 +155,7 @@ bool SensorUpdateKeyMap::insertFree(octomap::OcTreeKey& key)
   }
   octomap::OcTreeKey::KeyHash hasher;
   size_t hash = hasher(key);
-  size_t index = hash % table_.size();
+  size_t index = hash & table_mask_;
   bool rv = insertFreeByIndexImpl(key, index);
   // if we have just run out of room, this will resize our set
   if (rv) resizeIfNecessary();
@@ -549,7 +549,7 @@ bool SensorUpdateKeyMap::insertOccupied(octomap::OcTreeKey& key)
   }
   octomap::OcTreeKey::KeyHash hasher;
   size_t hash = hasher(key);
-  size_t index = hash % table_.size();
+  size_t index = hash & table_mask_;
   SensorUpdateKeyMap::Node *node = table_[index];
   while (node) {
     if (node->key == key) {
@@ -583,7 +583,7 @@ bool SensorUpdateKeyMap::insert(const octomap::OcTreeKey& key, bool value)
 bool SensorUpdateKeyMap::insert(const octomap::OcTreeKey& key, size_t hash, bool value)
 {
   if (isKeyOutOfBounds(key)) return false;
-  size_t index = hash % table_.size();
+  size_t index = hash & table_mask_;
   SensorUpdateKeyMap::Node *node = table_[index];
   while (node) {
     if (node->key == key) {

@@ -67,7 +67,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_newFullSub(false),
   m_newBinarySub(false),
   m_res(0.05),
-  m_treeDepth(0),
+  m_treeDepth(24),
   m_maxTreeDepthSetByConfig(false),
   m_maxTreeDepth(0),
   m_pointcloudMinX(-std::numeric_limits<double>::max()),
@@ -137,6 +137,13 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_nh_private.param("sensor_model/max_range", m_maxRange, m_maxRange);
 
   m_nh_private.param("resolution", m_res, m_res);
+  int tree_depth = (int)m_treeDepth;
+  m_nh_private.param("tree_depth", tree_depth, tree_depth);
+  m_treeDepth = (unsigned)tree_depth;
+  if (m_treeDepth > KEY_BIT_WIDTH) {
+    m_treeDepth = KEY_BIT_WIDTH;
+    ROS_WARN_STREAM("tree_depth of " << tree_depth << " is out of range, setting to " << m_treeDepth);
+  }
   m_nh_private.param("sensor_model/hit", probHit, 0.7);
   m_nh_private.param("sensor_model/miss", probMiss, 0.4);
   m_nh_private.param("sensor_model/min", thresMin, 0.12);
@@ -198,6 +205,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
 
   // initialize octomap object & params
   m_octree = new OcTreeT(m_res);
+  m_octree->setTreeDepth(m_treeDepth);
   m_octree->setProbHit(probHit);
   m_octree->setProbMiss(probMiss);
   m_octree->setClampingThresMin(thresMin);
@@ -207,6 +215,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   // make the universe and delta trees "binary" in nature by making the
   // probability of hit/miss much bigger than the clamping thresholds
   m_universe = new OcTreeT(m_res);
+  m_universe->setTreeDepth(m_treeDepth);
   m_universe->setProbHit(.99);
   m_universe->setProbMiss(.01);
   m_universe->setClampingThresMin(.1);
@@ -216,7 +225,6 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   // set the universe tree to occupied everywhere
   m_universe->setNodeValueAtDepth(OcTreeKey(), 0, m_universe->getClampingThresMaxLog());
 
-  m_treeDepth = m_octree->getTreeDepth();
   m_maxTreeDepth = m_treeDepth;
   m_gridmap.info.resolution = m_res;
 
@@ -385,6 +393,7 @@ bool OctomapServer::openFile(const std::string& filename){
       ROS_ERROR("Could not read OcTree in file, currently there are no other types supported in .ot");
       return false;
     }
+    m_octree->setTreeDepth(m_treeDepth);
 
   } else{
     return false;
@@ -1452,6 +1461,7 @@ void OctomapServer::publishBinaryOctoMapUpdate(const ros::Time& rostime, const r
   octomap_msgs::OctomapUpdatePtr map_msg_ptr(new octomap_msgs::OctomapUpdate());
   octomap_msgs::OctomapUpdate& map_msg = *map_msg_ptr;
   OcTreeT delta_map(m_res);
+  delta_map.setTreeDepth(m_treeDepth);
 
   // Set up header info
   map_msg.header.frame_id = m_worldFrameId;
@@ -1502,6 +1512,7 @@ void OctomapServer::publishFullOctoMapUpdate(const ros::Time& rostime, const ros
   octomap_msgs::OctomapUpdatePtr map_msg_ptr(new octomap_msgs::OctomapUpdate());
   octomap_msgs::OctomapUpdate& map_msg = *map_msg_ptr;
   OcTreeT delta_map(m_res);
+  delta_map.setTreeDepth(m_treeDepth);
 
   // Set up header info
   map_msg.header.frame_id = m_worldFrameId;

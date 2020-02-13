@@ -122,9 +122,10 @@ void SensorUpdateKeyMap::setFloorTruncation(octomap::key_type floor_z)
   truncate_floor_z_ = floor_z;
 }
 
-inline bool SensorUpdateKeyMap::insertFreeByIndexImpl(const octomap::OcTreeKey& key, size_t index)
+inline bool SensorUpdateKeyMap::insertFreeByIndexImpl(const octomap::OcTreeKey& key, size_t index, Node** table)
 {
-  SensorUpdateKeyMap::Node *node = table_[index];
+  SensorUpdateKeyMap::Node *table_node = table[index];
+  SensorUpdateKeyMap::Node *node = table_node;
   while (node) {
     if (node->key == key) {
       return false;
@@ -136,8 +137,8 @@ inline bool SensorUpdateKeyMap::insertFreeByIndexImpl(const octomap::OcTreeKey& 
   node = allocNodeFromCache();
   node->key = key;
   node->value = false;
-  node->next = table_[index];
-  table_[index] = node;
+  node->next = table_node;
+  table[index] = node;
   return true;
 }
 
@@ -156,7 +157,7 @@ bool SensorUpdateKeyMap::insertFree(octomap::OcTreeKey& key)
   octomap::OcTreeKey::KeyHash hasher;
   size_t hash = hasher(key);
   size_t index = hash & table_mask_;
-  bool rv = insertFreeByIndexImpl(key, index);
+  bool rv = insertFreeByIndexImpl(key, index, table_.data());
   // if we have just run out of room, this will resize our set
   if (rv) resizeIfNecessary();
   return rv;
@@ -198,9 +199,11 @@ bool SensorUpdateKeyMap::insertFreeCells(const octomap::OcTreeKey *free_cells, s
       ++z_keys_p;
     }
   }
+
+  Node** table = table_.data();
   for (i=0; i<free_cells_count; ++i)
   {
-    insertFreeByIndexImpl(free_cells[i], indecies[i]);
+    insertFreeByIndexImpl(free_cells[i], indecies[i], table);
   }
   return true;
 }

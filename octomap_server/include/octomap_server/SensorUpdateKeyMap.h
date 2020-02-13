@@ -126,21 +126,28 @@ public:
       bool operator!=(const iterator& rhs) { return !operator==(rhs); }
       iterator& operator++() {
         if (node_) {
-          if (node_->next) {
+          Node* const next_node = node_->next;
+          if (next_node) {
             // there was a chained node, go to next node in chain
-            node_ = node_->next;
+            node_ = next_node;
           } else {
             // scan down the table for a non-NULL entry
-            while (++table_index_ < key_map_.table_.size()) {
-              if (key_map_.table_[table_index_] != NULL) {
-                node_ = key_map_.table_[table_index_];
-                break;
+            // put loop variables on the stack for speed, and update the object
+            // when the next entry is found
+            size_t i = table_index_;
+            const size_t table_size = key_map_.table_.size();
+            Node** const table = key_map_.table_.data();
+            while (++i < table_size) {
+              Node* const table_node = table[i];
+              if (table_node) {
+                node_ = table_node;
+                table_index_ = i;
+                return *this;
               }
             }
-            if (table_index_ == key_map_.table_.size()) {
-              // no entries found, set node_ to NULL
-              node_ = NULL;
-            }
+            // no entries found, set node_ to NULL
+            node_ = NULL;
+            table_index_ = i;
           }
         }
         return *this;
@@ -190,7 +197,7 @@ protected:
   octomap::OcTreeKey *free_cells_;
   size_t free_cells_capacity_;
 
-  bool insertFreeByIndexImpl(const octomap::OcTreeKey& key, size_t index);
+  bool insertFreeByIndexImpl(const octomap::OcTreeKey& key, size_t index, Node** table);
 
   bool truncate_floor_;
   octomap::key_type truncate_floor_z_;

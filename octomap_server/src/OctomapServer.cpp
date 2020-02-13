@@ -954,8 +954,10 @@ void OctomapServer::handleRayPoint(SensorUpdateKeyMap* update_cells,
 void OctomapServer::applyUpdate()
 {
   // update all cells per the accumulated update
-  for (SensorUpdateKeyMap::iterator it = m_updateCells.begin(), end=m_updateCells.end(); it!= end; it++) {
+  SensorUpdateKeyMap::iterator it = m_updateCells.begin();
+  while (it) {
     m_octree->updateNode(it->key, it->value);
+    ++it;
   }
   // clear stored update
   m_updateCells.clear();

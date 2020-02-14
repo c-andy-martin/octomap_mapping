@@ -1,9 +1,30 @@
+#include <octomap_server/SensorUpdateKeyMap.h>
+
 #include <limits>
-#include "octomap_server/SensorUpdateKeyMap.h"
+
+#include <octomap_server/SensorUpdateKeyMapHashImpl.h>
+#include <octomap_server/SensorUpdateKeyMapArrayImpl.h>
 
 namespace octomap_server {
 
-void SensorUpdateKeyMap::clampRayToBounds(const OcTreeT& tree, const octomap::point3d& origin, octomap::point3d* end)
+SensorUpdateKeyMap::SensorUpdateKeyMap()
+  : free_cells_capacity_(0)
+  , truncate_floor_(false)
+{
+  octomap::OcTreeKey min_key(std::numeric_limits<octomap::key_type>::min(),
+                             std::numeric_limits<octomap::key_type>::min(),
+                             std::numeric_limits<octomap::key_type>::min());
+  octomap::OcTreeKey max_key(std::numeric_limits<octomap::key_type>::max(),
+                             std::numeric_limits<octomap::key_type>::max(),
+                             std::numeric_limits<octomap::key_type>::max());
+  setBounds(min_key, max_key);
+}
+
+SensorUpdateKeyMap::~SensorUpdateKeyMap()
+{
+}
+
+void SensorUpdateKeyMap::clampRayToBounds(const OcTreeT& tree, const octomap::point3d& origin, octomap::point3d* end) const
 {
   octomap::OcTreeKey origin_key;
   octomap::OcTreeKey end_key;
@@ -46,166 +67,10 @@ void SensorUpdateKeyMap::clampRayToBounds(const OcTreeT& tree, const octomap::po
   *end = tree.keyToCoord(end_key);
 }
 
-SensorUpdateKeyMap::iterator SensorUpdateKeyMap::begin()
-{
-  for (size_t i=0; i<table_.size(); ++i)
-  {
-    if (table_[i] != NULL)
-    {
-      return SensorUpdateKeyMap::iterator(*this, i, table_[i]);
-    }
-  }
-  return end();
-}
-
-SensorUpdateKeyMap::iterator SensorUpdateKeyMap::end()
-{
-  return SensorUpdateKeyMap::iterator(*this, table_.size(), NULL);
-}
-
-void SensorUpdateKeyMap::clear()
-{
-  // clear our node pointers out. do not de-allocate the table, we will re-use
-  // whatever size it is.
-  std::fill(table_.begin(), table_.end(), static_cast<Node*>(NULL));
-  // reset our node cache
-  resetNodeCache();
-}
-
-SensorUpdateKeyMap::SensorUpdateKeyMap(size_t initial_capacity, double max_load_factor)
-  : max_load_factor_(max_load_factor)
-  , free_cells_(NULL)
-  , free_cells_capacity_(0)
-  , truncate_floor_(false)
-  , min_key_(std::numeric_limits<octomap::key_type>::min(),
-             std::numeric_limits<octomap::key_type>::min(),
-             std::numeric_limits<octomap::key_type>::min())
-  , max_key_(std::numeric_limits<octomap::key_type>::max(),
-             std::numeric_limits<octomap::key_type>::max(),
-             std::numeric_limits<octomap::key_type>::max())
-{
-  initializeNodeCache(initial_capacity);
-  calculateTableCapacity();
-  table_.resize(table_capacity_, NULL);
-}
-
-SensorUpdateKeyMap::~SensorUpdateKeyMap()
-{
-  delete [] free_cells_;
-  table_.clear();
-  destroyNodeCache();
-}
-
-SensorUpdateKeyMap::iterator SensorUpdateKeyMap::find(const octomap::OcTreeKey& key)
-{
-  octomap::OcTreeKey::KeyHash hasher;
-  size_t hash = hasher(key);
-  return find(key, hash);
-}
-
-SensorUpdateKeyMap::iterator SensorUpdateKeyMap::find(const octomap::OcTreeKey& key, size_t hash)
-{
-  size_t index = hash & table_mask_;
-  SensorUpdateKeyMap::Node *node = table_[index];
-  while (node) {
-    if (node->key == key) {
-      return SensorUpdateKeyMap::iterator(*this, index, node);
-    }
-    node = node->next;
-  }
-  return end();
-}
-
 void SensorUpdateKeyMap::setFloorTruncation(octomap::key_type floor_z)
 {
   truncate_floor_ = true;
   truncate_floor_z_ = floor_z;
-}
-
-inline bool SensorUpdateKeyMap::insertFreeByIndexImpl(const octomap::OcTreeKey& key, size_t index, Node** table)
-{
-  SensorUpdateKeyMap::Node *table_node = table[index];
-  SensorUpdateKeyMap::Node *node = table_node;
-  while (node) {
-    if (node->key == key) {
-      return false;
-    }
-    node = node->next;
-  }
-
-  // insert a new node at the head of the chain for the bucket
-  node = allocNodeFromCache();
-  node->key = key;
-  node->value = false;
-  node->next = table_node;
-  table[index] = node;
-  return true;
-}
-
-// Returns true if a node was inserted, false if the node already existed
-bool SensorUpdateKeyMap::insertFree(octomap::OcTreeKey& key)
-{
-  if (isKeyOutOfBounds(key))
-  {
-    return false;
-  }
-  // apply floor truncation to the key first, moving the point to the floor
-  // if floor truncation is enabled and the z coord is below the floor
-  if (truncate_floor_ && key[2] < truncate_floor_z_) {
-    key.k[2] = truncate_floor_z_;
-  }
-  octomap::OcTreeKey::KeyHash hasher;
-  size_t hash = hasher(key);
-  size_t index = hash & table_mask_;
-  bool rv = insertFreeByIndexImpl(key, index, table_.data());
-  // if we have just run out of room, this will resize our set
-  if (rv) resizeIfNecessary();
-  return rv;
-}
-
-bool SensorUpdateKeyMap::insertFreeCells(const octomap::OcTreeKey *free_cells, size_t free_cells_count)
-{
-  if (free_cells_count == 0) {
-    return false;
-  }
-  while (node_cache_size_ + free_cells_count + 1 >= node_cache_capacity_) {
-    doubleCapacity();
-  }
-  const size_t n = ((free_cells_count-1) & ~7) + 8;
-  size_t x_keys[n] __attribute__((__aligned__(64)));
-  size_t y_keys[n] __attribute__((__aligned__(64)));
-  size_t z_keys[n] __attribute__((__aligned__(64)));
-  size_t indecies[n] __attribute__((__aligned__(64)));
-  unsigned int i=0, j=0;
-  for (i=0; i<free_cells_count; ++i) {
-    x_keys[i] = free_cells[i][0];
-    y_keys[i] = free_cells[i][1];
-    z_keys[i] = free_cells[i][2];
-  }
-  const size_t *x_keys_p = x_keys;
-  const size_t *y_keys_p = y_keys;
-  const size_t *z_keys_p = z_keys;
-  size_t *indecies_p = indecies;
-  const uint64_t table_mask = table_mask_;
-  for (i=0; i<n; i+=8) {
-    // structure this inner loop such that gcc vectorizes using best vector ops
-    for (j=0; j<8; ++j) {
-      // we can't vectorize modulus, so ensure the table is a power of two and
-      // use a bit mask
-      *indecies_p = (*x_keys_p + 1447 * *y_keys_p + 345637 * *z_keys_p) & table_mask;
-      ++indecies_p;
-      ++x_keys_p;
-      ++y_keys_p;
-      ++z_keys_p;
-    }
-  }
-
-  Node** table = table_.data();
-  for (i=0; i<free_cells_count; ++i)
-  {
-    insertFreeByIndexImpl(free_cells[i], indecies[i], table);
-  }
-  return true;
 }
 
 bool SensorUpdateKeyMap::insertFreeRay(const OcTreeT& tree,
@@ -288,56 +153,69 @@ bool SensorUpdateKeyMap::insertFreeRay(const OcTreeT& tree,
   if (free_cells_capacity_ < max_cells)
   {
     // need more space
-    delete [] free_cells_;
     // always over-allocate to leave some room to grow
     free_cells_capacity_ = max_cells * 2;
-    free_cells_ = new octomap::OcTreeKey[free_cells_capacity_];
+    free_cells_.reset(new octomap::OcTreeKey[free_cells_capacity_]);
   }
 
   size_t free_cells_count = 0;
+  octomap::OcTreeKey* free_cells = free_cells_.get();
 
   // Incremental phase
-  for (;;) {
-
+  for (;;)
+  {
     // We have moved out-of-bounds, stop tracing
     if (isKeyOutOfBounds(current_key))
       break;
 
     // add the cell
-    free_cells_[free_cells_count++] = current_key;
+    free_cells[free_cells_count++] = current_key;
 
-    if (tMax[0] < tMax[1]) {
-      if (tMax[0] < tMax[2]) {
+    if (tMax[0] < tMax[1])
+    {
+      if (tMax[0] < tMax[2])
+      {
         current_key[0] += step[0];
         tMax[0] += tDelta[0];
-        if (current_key[0] == justOut[0]) {
-          break;
-        }
-      } else {
-        current_key[2] += step[2];
-        tMax[2] += tDelta[2];
-        if (current_key[2] == justOut[2]) {
+        if (current_key[0] == justOut[0])
+        {
           break;
         }
       }
-    } else {
-      if (tMax[1] < tMax[2]) {
-        current_key[1] += step[1];
-        tMax[1] += tDelta[1];
-        if (current_key[1] == justOut[1]) {
-          break;
-        }
-      } else {
+      else
+      {
         current_key[2] += step[2];
         tMax[2] += tDelta[2];
-        if (current_key[2] == justOut[2]) {
+        if (current_key[2] == justOut[2])
+        {
+          break;
+        }
+      }
+    }
+    else
+    {
+      if (tMax[1] < tMax[2])
+      {
+        current_key[1] += step[1];
+        tMax[1] += tDelta[1];
+        if (current_key[1] == justOut[1])
+        {
+          break;
+        }
+      }
+      else
+      {
+        current_key[2] += step[2];
+        tMax[2] += tDelta[2];
+        if (current_key[2] == justOut[2])
+        {
           break;
         }
       }
     }
   }
   assert(free_cells_count <= free_cells_capacity_);
-  return insertFreeCells(free_cells_, free_cells_count);
+  return impl_->insertFreeCells(free_cells, free_cells_count);
 }
 
 bool SensorUpdateKeyMap::insertRay(const OcTreeT& tree,
@@ -432,7 +310,7 @@ bool SensorUpdateKeyMap::insertRay(const OcTreeT& tree,
   // Check the adjusted end before marking or clearing the end point to correctly apply discrete.
   if (discrete)
   {
-    if (find(end_key) != this->end())
+    if (impl_->find(end_key) != UNKNOWN)
     {
       // ray tracing endpoint already in update, skip ray-tracing.
       skip_tracing = true;
@@ -449,7 +327,7 @@ bool SensorUpdateKeyMap::insertRay(const OcTreeT& tree,
         {
           bool inserted = false;
           // call insertOccupied/insertFree so floor truncation works if enabled
-          if (end_occupied && insertOccupied(end_key) || !end_occupied && insertFree(end_key))
+          if ((end_occupied && insertOccupied(end_key)) || (!end_occupied && insertFree(end_key)))
           {
             inserted = true;
             cells_added = true;
@@ -538,7 +416,7 @@ bool SensorUpdateKeyMap::insertRay(const OcTreeT& tree,
 }
 
 // Returns true if a node was inserted, false if the node already existed
-bool SensorUpdateKeyMap::insertOccupied(octomap::OcTreeKey& key)
+bool SensorUpdateKeyMap::insert(const octomap::OcTreeKey& key, bool value)
 {
   if (isKeyOutOfBounds(key))
   {
@@ -547,146 +425,84 @@ bool SensorUpdateKeyMap::insertOccupied(octomap::OcTreeKey& key)
 
   // apply floor truncation to the key first, moving the point to the floor
   // if floor truncation is enabled and the z coord is below the floor
-  if (truncate_floor_ && key[2] < truncate_floor_z_) {
-    key.k[2] = truncate_floor_z_;
-  }
-  octomap::OcTreeKey::KeyHash hasher;
-  size_t hash = hasher(key);
-  size_t index = hash & table_mask_;
-  SensorUpdateKeyMap::Node *node = table_[index];
-  while (node) {
-    if (node->key == key) {
-      // Ensure that this key maps to occupied (true)
-      node->value = true;
-      return false;
+  if (truncate_floor_ && key[2] < truncate_floor_z_)
+  {
+    octomap::OcTreeKey trunc_key(key);
+    trunc_key.k[2] = truncate_floor_z_;
+    if (value)
+    {
+      return impl_->insertOccupied(trunc_key);
     }
-    node = node->next;
-  }
-
-  // insert a new node at the head of the chain for the bucket
-  node = allocNodeFromCache();
-  node->key = key;
-  node->value = true;
-  node->next = table_[index];
-  table_[index] = node;
-
-  // if we have just run out of room, this will resize our set
-  resizeIfNecessary();
-  return true;
-}
-
-// Returns true if a node was inserted, false if the node already existed
-bool SensorUpdateKeyMap::insert(const octomap::OcTreeKey& key, bool value)
-{
-  octomap::OcTreeKey::KeyHash hasher;
-  size_t hash = hasher(key);
-  return insert(key, hash, value);
-}
-
-bool SensorUpdateKeyMap::insert(const octomap::OcTreeKey& key, size_t hash, bool value)
-{
-  if (isKeyOutOfBounds(key)) return false;
-  size_t index = hash & table_mask_;
-  SensorUpdateKeyMap::Node *node = table_[index];
-  while (node) {
-    if (node->key == key) {
-      // Change the value in the map, iff it was false.
-      // True latches, because for sensor updates we want a cell with both
-      // ground and nonground points to be marked as occupied.
-      if (value && !node->value)
-      {
-        node->value = true;
-      }
-      return false;
-    }
-    node = node->next;
-  }
-
-  // insert a new node at the head of the chain for the bucket
-  node = allocNodeFromCache();
-  node->key = key;
-  node->value = value;
-  node->next = table_[index];
-  table_[index] = node;
-
-  // if we have just run out of room, this will resize our set
-  resizeIfNecessary();
-  return true;
-}
-
-void SensorUpdateKeyMap::resizeIfNecessary()
-{
-  assert(node_cache_size_ <= node_cache_capacity_);
-  // If we have run out of size in the node cache, double it.
-  if (node_cache_size_ == node_cache_capacity_) {
-    doubleCapacity();
-  }
-}
-
-void SensorUpdateKeyMap::initializeNodeCache(size_t capacity)
-{
-  node_cache_capacity_ = capacity;
-  node_cache_ = new unsigned char[sizeof(Node) * node_cache_capacity_];
-  node_cache_size_ = 0;
-}
-
-void SensorUpdateKeyMap::destroyNodeCache()
-{
-  resetNodeCache();
-  node_cache_capacity_ = 0;
-  delete [] node_cache_;
-}
-
-// Double the capacity of our set.
-// We do this by re-allocating our table to keep the max load factor,
-// allocating a new, double-sized node_cache, and then copying the old table
-// to the new.
-void SensorUpdateKeyMap::doubleCapacity()
-{
-  // Remember the old node cache information and table
-  std::vector<Node*> old_table(table_);
-  size_t old_capacity = node_cache_capacity_;
-  unsigned char * old_cache = node_cache_;
-  // Double the capacity and allocate new cache
-  initializeNodeCache(node_cache_capacity_ * 2);
-  // resize the hash table to keep the load factor balanced
-  calculateTableCapacity();
-  table_.resize(table_capacity_);
-  // clear all the old entries out
-  clear();
-  // Deep copy the old set to the newly allocated one.
-  for (size_t i=0; i<old_table.size(); ++i) {
-    Node* node = old_table[i];
-    while (node) {
-      insert(node->key, node->value);
-      node = node->next;
+    else
+    {
+      return impl_->insertFree(trunc_key);
     }
   }
-  // Destroy the old cache
-  delete [] old_cache;
+  else
+  {
+    if (value)
+    {
+      return impl_->insertOccupied(key);
+    }
+    else
+    {
+      return impl_->insertFree(key);
+    }
+  }
 }
 
-unsigned char * SensorUpdateKeyMap::getNewNodePtr() {
-  assert(node_cache_size_ < node_cache_capacity_);
-  unsigned char * new_node_memory = node_cache_ + node_cache_size_ * sizeof(Node);
-  node_cache_size_++;
-  return new_node_memory;
-}
-
-SensorUpdateKeyMap::Node* SensorUpdateKeyMap::allocNodeFromCache()
+void SensorUpdateKeyMap::setBounds(const octomap::OcTreeKey& min_key,
+                                   const octomap::OcTreeKey& max_key)
 {
-  return new(getNewNodePtr()) Node;
+  bool use_array = false;
+  max_key_ = max_key;
+  min_key_ = min_key;
+  octomap::OcTreeKey key_diff;
+  key_diff[0] = max_key[0] - min_key[0];
+  key_diff[1] = max_key[1] - min_key[1];
+  key_diff[2] = max_key[2] - min_key[2];
+  // Check each diff to ensure each individual dimension is below the threshold
+  // to prevent overflowing the multiplication.
+  if (key_diff[0] < voxel_volume_array_threshold &&
+      key_diff[1] < voxel_volume_array_threshold &&
+      key_diff[2] < voxel_volume_array_threshold)
+  {
+    size_t voxel_volume = static_cast<size_t>(key_diff[0]) * key_diff[1] * key_diff[2];
+    if (voxel_volume < voxel_volume_array_threshold)
+    {
+      use_array = true;
+    }
+  }
+  bool impl_is_array = (dynamic_cast<SensorUpdateKeyMapArrayImpl*>(impl_.get()) != nullptr);
+  // (re)allocate impl if necessary
+  if (impl_.get() == nullptr || impl_is_array != use_array)
+  {
+    if (use_array)
+    {
+      impl_.reset(new SensorUpdateKeyMapArrayImpl(min_key, max_key));
+    }
+    else
+    {
+      impl_.reset(new SensorUpdateKeyMapHashImpl());
+    }
+  }
+  else
+  {
+    impl_->clear();
+  }
+  impl_->setBounds(min_key, max_key);
 }
 
-void SensorUpdateKeyMap::resetNodeCache()
+VoxelState SensorUpdateKeyMap::find(const octomap::OcTreeKey& key) const
 {
-  // We do not want to reclaim any memory, keep the cache around. It can
-  // only grow to the size of the largest sensor update, which is what we
-  // want.
-  // Technically, we should call the destructor of every element here,
-  // however for efficiency, leverage the fact that we are storing
-  // plain-old-data and do nothing on destruction
-  node_cache_size_ = 0;
+  if (isKeyOutOfBounds(key))
+  {
+    return UNKNOWN;
+  }
+  else
+  {
+    return impl_->find(key);
+  }
 }
 
-} // end namespace octomap_server
+}  // namespace octomap_server

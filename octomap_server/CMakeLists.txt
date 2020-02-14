@@ -47,6 +47,8 @@ add_library(${PROJECT_NAME}
   src/TrackingOctomapServer.cpp
   src/PointCloudSynchronizer.cpp
   src/SensorUpdateKeyMap.cpp
+  src/SensorUpdateKeyMapHashImpl.cpp
+  src/SensorUpdateKeyMapArrayImpl.cpp
   src/OcTreeStampedWithExpiry.cpp
 )
 target_link_libraries(${PROJECT_NAME} ${LINK_LIBS})

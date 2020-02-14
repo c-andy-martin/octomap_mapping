@@ -229,6 +229,7 @@ protected:
                       bool occupied,
                       bool skip_tracing);
 
+  void resetUpdateBounds();
   void applyUpdate();
 
   /// label the input cloud "pc" into ground and nonground. Should be in the robot's fixed frame (not world!)

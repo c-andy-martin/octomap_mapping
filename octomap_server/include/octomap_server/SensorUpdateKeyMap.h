@@ -1,55 +1,36 @@
-#ifndef OCTOMAP_SENSOR_UPDATE_KEY_MAP_HH
-#define OCTOMAP_SENSOR_UPDATE_KEY_MAP_HH
+#ifndef OCTOMAP_SENSOR_UPDATE_KEY_MAP_H
+#define OCTOMAP_SENSOR_UPDATE_KEY_MAP_H
 
-#include <limits>
-#include <octomap/octomap.h>
-#include <octomap/OcTreeKey.h>
-#include <octomap_server/types.h>
+#include <memory>
+#include <octomap_server/SensorUpdateKeyMapImpl.h>
 
 namespace octomap_server {
 
-struct SensorUpdateKeyMapNode {
-  octomap::OcTreeKey key;
-  bool value;
-  struct SensorUpdateKeyMapNode *next;
-};
-
-// An optimized replacement for octomap::KeyMap which uses pre-allocated
-// memory for all nodes in the hash table, and stores true for occupied, false
-// for not. The class is optimized for storing a periodic sensor update by
-// keeping an instance allocated, inserting the readings for an update, and
-// then calling clear().
-// Memory is not freed by clear() but re-used.
-// clear() is optimized by not destroying the individual nodes, just zeroing
-// out the base hash table of pointers. This is possible since an OcTreeKey is
-// just plain-old-data. The hash table itself is never shrunk. This allows for
-// optimal use of a key set during a sensor update by re-using the same
-// SensorUpdateKeyMap object for each update. It will grow to match the size of the
-// largest update over the life of the OctomapServer, which is bounded in
-// space. This way, no allocation/deallocation is happening at all, which is
-// the biggest cost of the sensor updates, and hence the biggest cost of
-// OctomapServer. Not having to call the underlying memory allocator for every
-// node saves considerable CPU time and memory fragementation.
-class SensorUpdateKeyMap {
-
+class SensorUpdateKeyMap
+{
 public:
-  typedef SensorUpdateKeyMapNode Node;
-  SensorUpdateKeyMap(size_t initial_capacity=1024, double max_load_factor=0.5);
+  // If the voxel volume represented by the bounds is less than this
+  // threshold, the voxel array implementation will be used. Otherwise, the
+  // hash table implementation will be used (which will consume much less
+  // memory, but be more computationally expensive).
+  static constexpr size_t voxel_volume_array_threshold = (8*1024*1024);
+  SensorUpdateKeyMap();
   ~SensorUpdateKeyMap();
 
   void setFloorTruncation(octomap::key_type floor_z);
-  void setMinKey(const octomap::OcTreeKey& min_key) {min_key_ = min_key;}
-  void setMaxKey(const octomap::OcTreeKey& max_key) {max_key_ = max_key;}
-  inline bool isKeyOutOfBounds(const octomap::OcTreeKey& key)
+  /// NOTE: setBounds will call clear, so no need to clear first
+  void setBounds(const octomap::OcTreeKey& min_key,
+                 const octomap::OcTreeKey& max_key);
+  inline bool isKeyOutOfBounds(const octomap::OcTreeKey& key) const
   {
     return !(min_key_[0] <= key[0] && key[0] <= max_key_[0] &&
         min_key_[1] <= key[1] && key[1] <= max_key_[1] &&
         min_key_[2] <= key[2] && key[2] <= max_key_[2]);
   }
-  void clampRayToBounds(const OcTreeT& tree, const octomap::point3d& origin, octomap::point3d* end);
-  bool insertFree(octomap::OcTreeKey& key);
+  void clampRayToBounds(const OcTreeT& tree, const octomap::point3d& origin, octomap::point3d* end) const;
+  bool insertFree(const octomap::OcTreeKey& key) {return insert(key, false);}
   bool insertFreeRay(const OcTreeT& tree, const octomap::point3d& origin, const octomap::point3d& end);
-  bool insertOccupied(octomap::OcTreeKey& key);
+  bool insertOccupied(const octomap::OcTreeKey& key) {return insert(key, true);}
   /** Insert a ray, optionally marking or clearing the end.
    *
    * Does nothing if the origin is out of bounds.
@@ -91,13 +72,11 @@ public:
                  octomap::OcTreeKey* furthest_touched_key=NULL);
 
   // Returns true if the key was inserted, false if the key already existed
-  // Invalidates all prior iterators if a key is inserted.
   // Unlike std::unordered_map, if the key exists, and value is true, the old
   // value is overwritten with true. This is because we are modeling a sensor
   // and want a voxel with both a ground and non-ground point to be always
   // counted as occupeid.
   bool insert(const octomap::OcTreeKey& key, bool value = false);
-  bool insert(const octomap::OcTreeKey& key, size_t hash, bool value = false);
 
   // Insert from any container of OcTreeKey's
   // This will only insert clear space (value is always false)
@@ -109,107 +88,25 @@ public:
     }
   }
 
-  // Empty the sensor update key map
-  // Invalidates all iterators.
-  void clear();
+  /// Empty the sensor update key map
+  void clear() {impl_->clear();}
+  /// Apply this update to the tree
+  void apply(OcTreeT* tree) const {impl_->apply(tree);}
+  /// Return the state of the given voxel
+  VoxelState find(const octomap::OcTreeKey& key) const;
 
-  class iterator {
-    public:
-      iterator(SensorUpdateKeyMap& key_set, size_t table_index, Node *node)
-        : key_map_(key_set), table_index_(table_index), node_(node) {}
-      iterator(const iterator& rhs)
-        : key_map_(rhs.key_map_), table_index_(rhs.table_index_), node_(rhs.node_) {}
-      Node& operator*() { return *node_; }
-      Node* operator->() { return node_; }
-      operator bool() const { return node_ != NULL; }
-      bool operator==(const iterator& rhs) { return node_ == rhs.node_; }
-      bool operator!=(const iterator& rhs) { return !operator==(rhs); }
-      iterator& operator++() {
-        if (node_) {
-          Node* const next_node = node_->next;
-          if (next_node) {
-            // there was a chained node, go to next node in chain
-            node_ = next_node;
-          } else {
-            // scan down the table for a non-NULL entry
-            // put loop variables on the stack for speed, and update the object
-            // when the next entry is found
-            size_t i = table_index_;
-            const size_t table_size = key_map_.table_.size();
-            Node** const table = key_map_.table_.data();
-            while (++i < table_size) {
-              Node* const table_node = table[i];
-              if (table_node) {
-                node_ = table_node;
-                table_index_ = i;
-                return *this;
-              }
-            }
-            // no entries found, set node_ to NULL
-            node_ = NULL;
-            table_index_ = i;
-          }
-        }
-        return *this;
-      }
-      iterator operator++(int) {
-        iterator rv(*this);
-        operator++();
-        return rv;
-      }
-    protected:
-      SensorUpdateKeyMap &key_map_;
-      size_t table_index_;
-      Node *node_;
-  };
-
-  iterator find(const octomap::OcTreeKey& key);
-  iterator find(const octomap::OcTreeKey& key, size_t hash);
-  iterator begin();
-  iterator end();
-
-protected:
-  std::vector<Node*> table_;
-
-  bool insertFreeCells(const octomap::OcTreeKey *free_cells, size_t free_cells_count);
-  Node* allocNodeFromCache();
-
-  void initializeNodeCache(size_t capacity);
-  void destroyNodeCache();
-  unsigned char * getNewNodePtr();
-  void resetNodeCache();
-  void doubleCapacity();
-  void resizeIfNecessary();
-
-  double max_load_factor_;
-  unsigned char *node_cache_;
-  size_t node_cache_capacity_;
-  size_t node_cache_size_;
-  uint64_t table_mask_;
-  size_t table_capacity_;
-  void calculateTableCapacity() {
-    uint32_t capacity = node_cache_capacity_ / max_load_factor_;
-    uint32_t table_order_ = 33 -__builtin_clz(capacity-1);
-    table_capacity_ = (1<<table_order_);
-    table_mask_ = (table_capacity_-1);
-  }
-
-  octomap::OcTreeKey *free_cells_;
+private:
+  std::unique_ptr<SensorUpdateKeyMapImpl> impl_;
+  std::unique_ptr<octomap::OcTreeKey> free_cells_;
   size_t free_cells_capacity_;
-
-  bool insertFreeByIndexImpl(const octomap::OcTreeKey& key, size_t index, Node** table);
 
   bool truncate_floor_;
   octomap::key_type truncate_floor_z_;
 
   octomap::OcTreeKey min_key_;
   octomap::OcTreeKey max_key_;
-private:
-  // non-copyable. we could implement a deep copy, but there is no use case
-  // for it yet.
-  SensorUpdateKeyMap(const SensorUpdateKeyMap &rhs) {}
 };
 
-} // end namespace octomap_server
+}  // namespace octomap_server
 
-#endif
+#endif  // OCTOMAP_SENSOR_UPDATE_KEY_MAP_H

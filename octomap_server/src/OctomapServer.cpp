@@ -270,6 +270,10 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   } else
     ROS_INFO("Publishing non-latched (topics are only prepared as needed, will only be re-published on map change");
 
+  // Get bounds of tree setup before subscribing to topics, but after getting
+  // all parameters.
+  resetUpdateBounds();
+
   m_markerPub = m_nh.advertise<visualization_msgs::MarkerArray>("occupied_cells_vis_array", 1, m_latchedTopics);
   m_binaryMapPub = m_nh.advertise<Octomap>("octomap_binary", 1, boost::bind(&OctomapServer::onNewBinaryMapSubscription, this, _1));
   m_binaryMapUpdatePub = m_nh.advertise<octomap_msgs::OctomapUpdate>("octomap_binary_updates", 10, boost::bind(&OctomapServer::onNewBinaryMapUpdateSubscription, this, _1));
@@ -756,17 +760,6 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   {
     m_updateCells.setFloorTruncation(m_octree->coordToKey(floor_truncation_z_));
   }
-  if (m_baseDistanceLimitPeriod > 0.0)
-  {
-    tf::Vector3 origin = m_baseToWorldTf.getOrigin();
-    octomap::point3d base_position(origin.x(), origin.y(), origin.z());
-    octomap::OcTreeKey minKey;
-    octomap::OcTreeKey maxKey;
-    m_octree->calculateBounds(m_update2DDistanceLimit, m_updateHeightLimit, m_updateDepthLimit, base_position,
-                              &minKey, &maxKey);
-    m_updateCells.setMinKey(minKey);
-    m_updateCells.setMaxKey(maxKey);
-  }
 
   updateMinKey(originKey, m_updateBBXMin);
   updateMaxKey(originKey, m_updateBBXMax);
@@ -908,30 +901,28 @@ void OctomapServer::handleRayPoint(SensorUpdateKeyMap* update_cells,
   if (discrete)
   {
     octomap::OcTreeKey point_key = m_octree->coordToKey(point);
-    octomap::OcTreeKey::KeyHash hasher;
-    size_t key_hash = hasher(point_key);
-    SensorUpdateKeyMap::iterator it = m_voxelFilter.find(point_key, key_hash);
-    if (it != m_voxelFilter.end())
+    VoxelState voxel_state = m_voxelFilter.find(point_key);
+    if (voxel_state != UNKNOWN)
     {
-      bool was_occupied = it->value;
+      bool was_occupied = (voxel_state == OCCUPIED);
       if (was_occupied || !occupied)
       {
         // Discrete is set and we have already processed this point this
         // update cycle and the old point was occupied or the new point is not
-        // ocupied. Nothing more to do.
+        // occupied. Nothing more to do.
         return;
       }
       else
       {
         // Else, the point was not occupied (yet we have seen it) and the new
         // point is occupied. Change the voxel memory to occupied.
-        it->value = true;
+        m_voxelFilter.insertOccupied(point_key);
       }
     }
     else
     {
       // Memorize this voxel as being used.
-      m_voxelFilter.insert(point_key, key_hash, occupied);
+      m_voxelFilter.insert(point_key, occupied);
     }
   }
 
@@ -952,16 +943,25 @@ void OctomapServer::handleRayPoint(SensorUpdateKeyMap* update_cells,
 
 void OctomapServer::applyUpdate()
 {
-  // update all cells per the accumulated update
-  SensorUpdateKeyMap::iterator it = m_updateCells.begin();
-  while (it) {
-    m_octree->updateNode(it->key, it->value);
-    ++it;
+  // apply the the accumulated update
+  m_updateCells.apply(m_octree);
+  // reset the bounds now
+  resetUpdateBounds();
+}
+
+void OctomapServer::resetUpdateBounds()
+{
+  if (m_baseDistanceLimitPeriod > 0.0)
+  {
+    tf::Vector3 origin = m_baseToWorldTf.getOrigin();
+    octomap::point3d base_position(origin.x(), origin.y(), origin.z());
+    octomap::OcTreeKey minKey;
+    octomap::OcTreeKey maxKey;
+    m_octree->calculateBounds(m_update2DDistanceLimit, m_updateHeightLimit, m_updateDepthLimit, base_position,
+                              &minKey, &maxKey);
+    m_updateCells.setBounds(minKey, maxKey);
+    m_voxelFilter.setBounds(minKey, maxKey);
   }
-  // clear stored update
-  m_updateCells.clear();
-  // clear stored voxel filter
-  m_voxelFilter.clear();
 }
 
 void OctomapServer::publishAll(const ros::Time& rostime){

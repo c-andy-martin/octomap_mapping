@@ -226,31 +226,6 @@ OcTreeNodeStampedWithExpiry* OcTreeStampedWithExpiry::updateNode(const octomap::
 
 void OcTreeStampedWithExpiry::updateNodeLogOdds(OcTreeNodeStampedWithExpiry* node, const float& update) const
 {
-  // Update value based on expiry if present
-  // This will rarely be present, only if we haven't seen this node recently
-  time_t expiry = node->getExpiry();
-  // For now, only decay occupied nodes. Free ones have such a simple timeout
-  // mechanism that decaying the timeout prior to a miss is practically
-  // useless, so avoid the computational cost for free nodes.
-  if (expiry != 0 && isNodeOccupied(node))
-  {
-    time_t orig_delta_t = expiry - node->getTimestamp();
-    time_t curr_delta_t = expiry - last_expire_time;
-    if (curr_delta_t <= 0)
-    {
-      // Its already expired, set it back to the background value prior to update
-      node->setLogOdds(occ_prob_thres_log);
-    }
-    else
-    {
-      // Decay the value towards the background by an amount proportional to the remaining time
-      double decay_factor = ((double)curr_delta_t)/((double)orig_delta_t);
-      double logodds_delta = node->getLogOdds() - occ_prob_thres_log;
-      node->setLogOdds(occ_prob_thres_log + logodds_delta * decay_factor);
-    }
-    // The above code should not be able to alter whether the node was occupied
-    assert(isNodeOccupied(node));
-  }
   OccupancyOcTreeBase<OcTreeNodeStampedWithExpiry>::updateNodeLogOdds(node, update);
   node->setTimestamp(last_expire_time);
   // Because we will very likely observe the same space multiple times, we do

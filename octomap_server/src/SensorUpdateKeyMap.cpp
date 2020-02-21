@@ -117,8 +117,14 @@ bool SensorUpdateKeyMap::insertFreeRay(const OcTreeT& tree,
 
   for(unsigned int i=0; i < 3; ++i) {
     // tally up max_cells (maximum ray trace is one cell per delta dimension)
-    // use signed math to find the correct delta
-    max_cells += abs((int)origin_key[i] - (int)end_key[i]) + 1;
+    if (origin_key[i] > end_key[i])
+    {
+      max_cells += origin_key[i] - end_key[i] + 1;
+    }
+    else
+    {
+      max_cells += end_key[i] - origin_key[i] + 1;
+    }
 
     // compute step direction
     if (direction(i) > 0.0) step[i] = 1;

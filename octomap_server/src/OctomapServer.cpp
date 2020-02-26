@@ -271,6 +271,21 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   } else
     ROS_INFO("Publishing non-latched (topics are only prepared as needed, will only be re-published on map change");
 
+  {
+    size_t threshold = 0;
+    int t = 64*1024*1024;
+    private_nh.param("voxel_volume_array_threshold", t, t);
+    if (t > 0)
+    {
+      threshold = t;
+    }
+    m_updateCells.setVoxelVolumeArrayThreshold(threshold);
+    m_voxelFilter.setVoxelVolumeArrayThreshold(threshold);
+  }
+
+  m_updateCells.setDepth(m_treeDepth);
+  // voxel filter doesn't need layers
+  m_voxelFilter.setDepth(0);
   // Get bounds of tree setup before subscribing to topics, but after getting
   // all parameters.
   resetUpdateBounds();
@@ -423,6 +438,10 @@ bool OctomapServer::openFile(const std::string& filename){
   m_updateBBXMax[0] = m_octree->coordToKey(maxX);
   m_updateBBXMax[1] = m_octree->coordToKey(maxY);
   m_updateBBXMax[2] = m_octree->coordToKey(maxZ);
+
+  // Reset map update and voxel filter depth and bounds
+  m_updateCells.setDepth(m_treeDepth);
+  resetUpdateBounds();
 
   publishAll();
 
@@ -903,9 +922,9 @@ void OctomapServer::handleRayPoint(SensorUpdateKeyMap* update_cells,
   {
     octomap::OcTreeKey point_key = m_octree->coordToKey(point);
     VoxelState voxel_state = m_voxelFilter.find(point_key);
-    if (voxel_state != UNKNOWN)
+    if (voxel_state != voxel_state::UNKNOWN)
     {
-      bool was_occupied = (voxel_state == OCCUPIED);
+      bool was_occupied = (voxel_state == voxel_state::OCCUPIED);
       if (was_occupied || !occupied)
       {
         // Discrete is set and we have already processed this point this
@@ -944,10 +963,14 @@ void OctomapServer::handleRayPoint(SensorUpdateKeyMap* update_cells,
 
 void OctomapServer::applyUpdate()
 {
-  // apply the the accumulated update
-  m_updateCells.apply(m_octree);
+  // finalize the update layers.
+  m_updateCells.updateLayers(*m_octree);
+  // have the tree apply the the (layered) accumulated update
+  m_octree->applyUpdate(m_updateCells);
   // reset the bounds now
   resetUpdateBounds();
+  // clear the voxel filter
+  m_voxelFilter.clear();
 }
 
 void OctomapServer::resetUpdateBounds()
@@ -961,7 +984,13 @@ void OctomapServer::resetUpdateBounds()
     m_octree->calculateBounds(m_update2DDistanceLimit, m_updateHeightLimit, m_updateDepthLimit, base_position,
                               &minKey, &maxKey);
     m_updateCells.setBounds(minKey, maxKey);
-    m_voxelFilter.setBounds(minKey, maxKey);
+    // Leave the voxel filter bounds maxed out.
+    // We want to be able to filter everywhere, not just near the bot.
+  }
+  else
+  {
+    // If not limiting distance, still clear the update on reset bounds
+    m_updateCells.clear();
   }
 }
 

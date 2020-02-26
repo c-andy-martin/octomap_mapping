@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <octomap/OcTreeNode.h>
 #include <octomap/OccupancyOcTreeBase.h>
+#include <octomap_server/SensorUpdateKeyMap.h>
 
 namespace octomap_server {
 using NodeChangeNotification = std::function<void(const octomap::OcTreeKey&, unsigned int)>;
@@ -14,11 +15,11 @@ using NodeChangeNotification = std::function<void(const octomap::OcTreeKey&, uns
 // node definition
 class OcTreeNodeStampedWithExpiry : public octomap::OcTreeNode
 {
-
+    using super = octomap::OcTreeNode;
   public:
     // Class-wide Parameters.
 
-    OcTreeNodeStampedWithExpiry() : octomap::OcTreeNode(), stamp(0), expiry(0) {}
+    OcTreeNodeStampedWithExpiry() : super(), stamp(0), expiry(0) {}
 
     bool operator==(const OcTreeNodeStampedWithExpiry& rhs) const
     {
@@ -28,7 +29,7 @@ class OcTreeNodeStampedWithExpiry : public octomap::OcTreeNode
 
     void copyData(const OcTreeNodeStampedWithExpiry& from)
     {
-      octomap::OcTreeNode::copyData(from);
+      super::copyData(from);
       stamp = from.stamp;
       expiry = from.expiry;
     }
@@ -44,7 +45,7 @@ class OcTreeNodeStampedWithExpiry : public octomap::OcTreeNode
     // update occupancy and timesteps of inner nodes
     inline void updateOccupancyChildren()
     {
-      octomap::OcTreeNode::updateOccupancyChildren();
+      super::updateOccupancyChildren();
 
       time_t min_stamp = std::numeric_limits<time_t>::max();
       time_t min_expiry = std::numeric_limits<time_t>::max();
@@ -78,8 +79,9 @@ class OcTreeNodeStampedWithExpiry : public octomap::OcTreeNode
 // Tree definition
 class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeStampedWithExpiry>
 {
-
+    using super = octomap::OccupancyOcTreeBase<OcTreeNodeStampedWithExpiry>;
   public:
+    using super::NodeType;
     // Default constructor, sets resolution.
     // Be sure to call expireNodes() after construction to initialize the
     // expiration time. This can not be done in the default constructor
@@ -143,7 +145,20 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
     /// Get mode of deleting free space
     bool getDeleteMinimum() { return delete_minimum; }
 
+    // Apply a sensor update to our tree efficiently.
+    // This method is O(n*log(depth)), where looping over the
+    // update and calling updateNode would be O(n*depth) where n is the number
+    // of new nodes in the update and depth is the tree_depth.
+    void applyUpdate(const SensorUpdateKeyMap& update);
+
   protected:
+    // Returns true if the node should be removed from the tree
+    // This might happen if delete_minimum is set.
+    bool applyUpdateRecurs(const SensorUpdateKeyMap& update,
+                           NodeType* node,
+                           bool node_just_created,
+                           const octomap::OcTreeKey& key,
+                           unsigned int depth);
     // Quadratic delta-t expiration coefficients. The input is the number of
     // times a particular mode was marked from the default value (which would
     // be the current logodds divided prob_hit_log).

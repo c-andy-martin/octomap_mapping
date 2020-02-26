@@ -31,13 +31,18 @@ public:
   SensorUpdateKeyMapHashImpl(const SensorUpdateKeyMapHashImpl &rhs) = delete;
   virtual ~SensorUpdateKeyMapHashImpl();
 
+  virtual void clear();
   virtual bool insertFree(const octomap::OcTreeKey& key);
   virtual bool insertFreeCells(const octomap::OcTreeKey *free_cells, size_t free_cells_count);
   virtual bool insertOccupied(const octomap::OcTreeKey& key);
-  virtual void clear();
-  virtual void setBounds(const octomap::OcTreeKey& min_key, const octomap::OcTreeKey& max_key) {}
-
-  virtual void apply(OcTreeT* tree) const;
+  virtual void insertInner(const octomap::OcTreeKey& key);
+  virtual void insert(const octomap::OcTreeKey& key, VoxelState state);
+  virtual void setBounds(const octomap::OcTreeKey& min_key, const octomap::OcTreeKey& max_key)
+  {
+    min_key_ = min_key;
+    max_key_ = max_key;
+  }
+  virtual void downSample(const octomap::OcTreeSpace& tree, SensorUpdateKeyMapImpl* output_map) const;
 
   virtual VoxelState find(const octomap::OcTreeKey& key) const;
 
@@ -47,7 +52,7 @@ private:
   struct Node
   {
     octomap::OcTreeKey key;
-    bool value;
+    VoxelState value;
     struct Node *next;
   };
 
@@ -74,6 +79,10 @@ private:
     table_capacity_ = (1<<table_order_);
     table_mask_ = (table_capacity_-1);
   }
+
+  // min/max used in downSample
+  octomap::OcTreeKey min_key_;
+  octomap::OcTreeKey max_key_;
 
   bool insertFreeByIndexImpl(const octomap::OcTreeKey& key, size_t index, Node** table);
 };

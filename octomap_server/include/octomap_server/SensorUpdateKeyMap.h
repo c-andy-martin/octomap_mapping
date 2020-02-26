@@ -2,6 +2,7 @@
 #define OCTOMAP_SENSOR_UPDATE_KEY_MAP_H
 
 #include <memory>
+#include <octomap/octomap.h>
 #include <octomap_server/SensorUpdateKeyMapImpl.h>
 
 namespace octomap_server {
@@ -9,27 +10,50 @@ namespace octomap_server {
 class SensorUpdateKeyMap
 {
 public:
-  // If the voxel volume represented by the bounds is less than this
-  // threshold, the voxel array implementation will be used. Otherwise, the
-  // hash table implementation will be used (which will consume much less
-  // memory, but be more computationally expensive).
-  static constexpr size_t voxel_volume_array_threshold = (8*1024*1024);
   SensorUpdateKeyMap();
   ~SensorUpdateKeyMap();
 
+  //// NOTE: has no effect until setBounds is called
+  void setVoxelVolumeArrayThreshold(size_t t) { voxel_volume_array_threshold_ = t; }
   void setFloorTruncation(octomap::key_type floor_z);
   /// NOTE: setBounds will call clear, so no need to clear first
   void setBounds(const octomap::OcTreeKey& min_key,
                  const octomap::OcTreeKey& max_key);
+  /// setDepth should be called first before the first call to setBounds
+  void setDepth(unsigned int depth)
+  {
+    depth_ = depth;
+    center_key_ = (1 << (depth - 1));
+  }
+
   inline bool isKeyOutOfBounds(const octomap::OcTreeKey& key) const
   {
     return !(min_key_[0] <= key[0] && key[0] <= max_key_[0] &&
         min_key_[1] <= key[1] && key[1] <= max_key_[1] &&
         min_key_[2] <= key[2] && key[2] <= max_key_[2]);
   }
-  void clampRayToBounds(const OcTreeT& tree, const octomap::point3d& origin, octomap::point3d* end) const;
+
+  // Returns true if the key at the given level of the tree is entirely out
+  // of bounds. (depth 0 is the root of the tree).
+  // TODO: Move this into octomap itself. It has this same logic duplicated
+  // inside both the bounding box iterator and deleteAABB.
+  inline bool isKeyOutOfBounds(const octomap::OcTreeKey& key, unsigned int depth) const
+  {
+    if (depth == depth_)
+    {
+      return isKeyOutOfBounds(key);
+    }
+    assert(depth < depth_);
+    const octomap::key_type offset_down = (center_key_ >> depth);
+    const octomap::key_type offset_up = ((center_key_ - 1) >> depth);
+    return !((min_key_[0] <= (key[0] + offset_up)) && (max_key_[0] >= (key[0] - offset_down)) &&
+             (min_key_[1] <= (key[1] + offset_up)) && (max_key_[1] >= (key[1] - offset_down)) &&
+             (min_key_[2] <= (key[2] + offset_up)) && (max_key_[2] >= (key[2] - offset_down)));
+  }
+
+  void clampRayToBounds(const octomap::OcTreeSpace& tree, const octomap::point3d& origin, octomap::point3d* end) const;
   bool insertFree(const octomap::OcTreeKey& key) {return insert(key, false);}
-  bool insertFreeRay(const OcTreeT& tree, const octomap::point3d& origin, const octomap::point3d& end);
+  bool insertFreeRay(const octomap::OcTreeSpace& tree, const octomap::point3d& origin, const octomap::point3d& end);
   bool insertOccupied(const octomap::OcTreeKey& key) {return insert(key, true);}
   /** Insert a ray, optionally marking or clearing the end.
    *
@@ -59,7 +83,7 @@ public:
    * @param furthest_touched_key key furthest from origin updated
    * @return true if any work is done
    */
-  bool insertRay(const OcTreeT& tree,
+  bool insertRay(const octomap::OcTreeSpace& tree,
                  const octomap::point3d& origin,
                  octomap::point3d end,
                  bool discrete=false,
@@ -90,13 +114,28 @@ public:
 
   /// Empty the sensor update key map
   void clear() {impl_->clear();}
-  /// Apply this update to the tree
-  void apply(OcTreeT* tree) const {impl_->apply(tree);}
   /// Return the state of the given voxel
   VoxelState find(const octomap::OcTreeKey& key) const;
 
+  /// Return the state of the given voxel at the given depth in the tree
+  /// (depth 0 is the root, opposite of level, coresponding to octomap APIs)
+  /// The layers above 0 are only updated when updateLayers is called
+  VoxelState find(const octomap::OcTreeKey& key, unsigned int depth) const;
+
+  /// Update the down-sampled layers using the given OcTreeSpace.
+  /// Call this after the update is complete prior to using the version of
+  /// find() that takes depth.
+  void updateLayers(const octomap::OcTreeSpace& tree);
+
 private:
-  std::unique_ptr<SensorUpdateKeyMapImpl> impl_;
+  // If the voxel volume represented by the bounds is less than this
+  // threshold, the voxel array implementation will be used. Otherwise, the
+  // hash table implementation will be used (which will consume much less
+  // memory, but be more computationally expensive).
+  size_t voxel_volume_array_threshold_;
+  std::vector<std::unique_ptr<SensorUpdateKeyMapImpl>> impls_;
+  // convenience pointer
+  SensorUpdateKeyMapImpl* impl_;
   std::unique_ptr<octomap::OcTreeKey> free_cells_;
   size_t free_cells_capacity_;
 
@@ -105,6 +144,8 @@ private:
 
   octomap::OcTreeKey min_key_;
   octomap::OcTreeKey max_key_;
+  unsigned int depth_;
+  octomap::key_type center_key_;  // Cache the center key for the given depth
 };
 
 }  // namespace octomap_server

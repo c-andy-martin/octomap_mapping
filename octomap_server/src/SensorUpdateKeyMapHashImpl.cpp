@@ -41,18 +41,11 @@ VoxelState SensorUpdateKeyMapHashImpl::find(const octomap::OcTreeKey& key, size_
   {
     if (node->key == key)
     {
-      if (node->value)
-      {
-        return OCCUPIED;
-      }
-      else
-      {
-        return FREE;
-      }
+      return node->value;
     }
     node = node->next;
   }
-  return UNKNOWN;
+  return voxel_state::UNKNOWN;
 }
 
 bool SensorUpdateKeyMapHashImpl::insertFreeByIndexImpl(const octomap::OcTreeKey& key, size_t index, Node** table)
@@ -69,7 +62,7 @@ bool SensorUpdateKeyMapHashImpl::insertFreeByIndexImpl(const octomap::OcTreeKey&
   // insert a new node at the head of the chain for the bucket
   node = allocNodeFromCache();
   node->key = key;
-  node->value = false;
+  node->value = voxel_state::FREE;
   node->next = table_node;
   table[index] = node;
   return true;
@@ -142,8 +135,8 @@ bool SensorUpdateKeyMapHashImpl::insertOccupied(const octomap::OcTreeKey& key)
   {
     if (node->key == key)
     {
-      // Ensure that this key maps to occupied (true)
-      node->value = true;
+      // Ensure that this key maps to occupied
+      node->value = voxel_state::OCCUPIED;
       return false;
     }
     node = node->next;
@@ -152,13 +145,139 @@ bool SensorUpdateKeyMapHashImpl::insertOccupied(const octomap::OcTreeKey& key)
   // insert a new node at the head of the chain for the bucket
   node = allocNodeFromCache();
   node->key = key;
-  node->value = true;
+  node->value = voxel_state::OCCUPIED;
   node->next = table_[index];
   table_[index] = node;
 
   // if we have just run out of room, this will resize our set
   resizeIfNecessary();
   return true;
+}
+
+void SensorUpdateKeyMapHashImpl::insertInner(const octomap::OcTreeKey& key)
+{
+  octomap::OcTreeKey::KeyHash hasher;
+  size_t hash = hasher(key);
+  size_t index = hash & table_mask_;
+  Node *node = table_[index];
+  while (node)
+  {
+    if (node->key == key)
+    {
+      // do not override an existing node
+      return;
+    }
+    node = node->next;
+  }
+
+  // insert a new node at the head of the chain for the bucket
+  node = allocNodeFromCache();
+  node->key = key;
+  node->value = voxel_state::INNER;
+  node->next = table_[index];
+  table_[index] = node;
+
+  // if we have just run out of room, this will resize our set
+  resizeIfNecessary();
+}
+
+void SensorUpdateKeyMapHashImpl::insert(const octomap::OcTreeKey& key, VoxelState state)
+{
+  octomap::OcTreeKey::KeyHash hasher;
+  size_t hash = hasher(key);
+  size_t index = hash & table_mask_;
+  Node *node = table_[index];
+  while (node)
+  {
+    if (node->key == key)
+    {
+      // do not override an existing node
+      return;
+    }
+    node = node->next;
+  }
+
+  // insert a new node at the head of the chain for the bucket
+  node = allocNodeFromCache();
+  node->key = key;
+  node->value = state;
+  node->next = table_[index];
+  table_[index] = node;
+
+  // if we have just run out of room, this will resize our set
+  resizeIfNecessary();
+}
+
+void SensorUpdateKeyMapHashImpl::downSample(const octomap::OcTreeSpace& tree, SensorUpdateKeyMapImpl* output_map) const
+{
+  SensorUpdateKeyMapImpl::downSample(tree, output_map);
+  unsigned int target_depth = getDepth() - output_map->getLevel();
+  unsigned int voxel_state_counts[voxel_state::MAX] = {0};
+  // first ensure the output bounds are set correctly
+  output_map->setBounds(min_key_, max_key_);
+
+  octomap::key_type center_offset_key = octomap::computeCenterOffsetKey(target_depth, tree.getCenterKey());
+
+  // loop over the hash table
+  const unsigned int table_size = table_.size();
+  auto table = table_.data();
+  for (unsigned int i=0; i<table_size; ++i)
+  {
+    const Node* node = table_[i];
+    while (node)
+    {
+      octomap::OcTreeKey target_key = tree.adjustKeyAtDepth(node->key, target_depth);
+      // if the output map doesn't yet have this key, time to add it.
+      if (output_map->find(target_key) == voxel_state::UNKNOWN)
+      {
+        unsigned int free_count=0;
+        unsigned int inner_count=0;
+        voxel_state_counts[voxel_state::FREE] = 0;
+        voxel_state_counts[voxel_state::OCCUPIED] = 0;
+        for (unsigned int i=0; i<8; ++i)
+        {
+          octomap::OcTreeKey child_key;
+          octomap::computeChildKey(i, center_offset_key, target_key, child_key);
+          const VoxelState voxel_state = find(child_key);
+          ++voxel_state_counts[voxel_state];
+        }
+        if (voxel_state_counts[voxel_state::FREE] == 8)
+        {
+          output_map->insertFree(target_key);
+        }
+        else if (voxel_state_counts[voxel_state::OCCUPIED] == 8)
+        {
+          output_map->insertOccupied(target_key);
+        }
+        else
+        {
+          // There must be at least one child key to get here
+          // Mark the free and/or occupied bits to match the children that are
+          // present. This allows for implemetations that do not store free
+          // space to skip large sections of tree that only have free space
+          // under it, for example.
+          VoxelState new_state = voxel_state::INNER;
+          if (voxel_state_counts[voxel_state::FREE] > 0 ||
+              voxel_state_counts[voxel_state::INNER | voxel_state::FREE] > 0)
+          {
+            new_state |= voxel_state::FREE;
+          }
+          if (voxel_state_counts[voxel_state::OCCUPIED] > 0 ||
+              voxel_state_counts[voxel_state::INNER | voxel_state::OCCUPIED] > 0)
+          {
+            new_state |= voxel_state::OCCUPIED;
+          }
+          if (voxel_state_counts[voxel_state::INNER | voxel_state::OCCUPIED | voxel_state::FREE] > 0)
+          {
+            new_state |= voxel_state::FREE;
+            new_state |= voxel_state::OCCUPIED;
+          }
+          output_map->insert(target_key, new_state);
+        }
+      }
+      node = node->next;
+    }
+  }
 }
 
 void SensorUpdateKeyMapHashImpl::resizeIfNecessary()
@@ -206,13 +325,17 @@ void SensorUpdateKeyMapHashImpl::doubleCapacity()
     Node* node = old_table[i];
     while (node)
     {
-      if (node->value)
+      if (node->value == voxel_state::FREE)
       {
         insertFree(node->key);
       }
-      else
+      else if (node->value == voxel_state::OCCUPIED)
       {
         insertOccupied(node->key);
+      }
+      else if (node->value == voxel_state::INNER)
+      {
+        insertInner(node->key);
       }
       node = node->next;
     }
@@ -244,6 +367,7 @@ void SensorUpdateKeyMapHashImpl::resetNodeCache()
   node_cache_size_ = 0;
 }
 
+#if 0
 void SensorUpdateKeyMapHashImpl::apply(OcTreeT* tree) const
 {
   const unsigned int table_size = table_.size();
@@ -258,5 +382,6 @@ void SensorUpdateKeyMapHashImpl::apply(OcTreeT* tree) const
     }
   }
 }
+#endif
 
 } // end namespace octomap_server

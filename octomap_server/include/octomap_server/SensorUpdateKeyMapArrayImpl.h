@@ -17,20 +17,35 @@ public:
   SensorUpdateKeyMapArrayImpl(const octomap::OcTreeKey& min_key, const octomap::OcTreeKey& max_key);
   virtual ~SensorUpdateKeyMapArrayImpl() {}
   virtual void clear();
-  virtual void apply(OcTreeT* tree) const;
   virtual void setBounds(const octomap::OcTreeKey& min_key, const octomap::OcTreeKey& max_key);
   virtual bool insertFree(const octomap::OcTreeKey& key);
   virtual bool insertFreeCells(const octomap::OcTreeKey *free_cells, size_t free_cells_count);
   virtual bool insertOccupied(const octomap::OcTreeKey& key);
+  virtual void insertInner(const octomap::OcTreeKey& key);
+  virtual void insert(const octomap::OcTreeKey& key, VoxelState state);
+  virtual void downSample(const octomap::OcTreeSpace& tree, SensorUpdateKeyMapImpl* output_map) const;
   virtual VoxelState find(const octomap::OcTreeKey& key) const;
 private:
+  void downSample(const octomap::OcTreeSpace& tree, SensorUpdateKeyMapArrayImpl* output_array) const;
   inline unsigned int calculateIndex(const octomap::OcTreeKey& key) const
   {
-    const unsigned int i = key[0] - min_key_[0];
-    const unsigned int j = key[1] - min_key_[1];
-    const unsigned int k = key[2] - min_key_[2];
-    return i + j*dims_[0] + k*skip_;
+    if (level_ < depth_)
+    {
+      // Bounds checking should be done by the interface class, not the
+      // implementation. Assert that the key is in bounds.
+      const unsigned int i = (key[0] - min_key_[0]) >> level_;
+      const unsigned int j = (key[1] - min_key_[1]) >> level_;
+      const unsigned int k = (key[2] - min_key_[2]) >> level_;
+      assert(i < dims_[0]);
+      assert(j < dims_[1]);
+      assert(k < dims_[2]);
+      unsigned int rv = i + j*dims_[0] + k*skip_;
+      assert (rv < grid_.size());
+      return rv;
+    }
+    return 0;
   }
+
   // NOTE: does no bounds checking at all. It is assumed that
   // SensorUpdateKeyMap does the bounds checking.
   inline const VoxelState& gridRef(const octomap::OcTreeKey& key) const
@@ -52,7 +67,9 @@ private:
     }
     return false;
   }
-  octomap::OcTreeKey min_key_;
+  // Note that min/max are not center keys, but index keys!
+  octomap::OcTreeKey min_key_;  // index key of minimum corner at level_
+  octomap::OcTreeKey max_key_;  // index key of maximum corner at level_ (incl.)
   octomap::OcTreeKey dims_;
   unsigned int skip_;
   std::vector<VoxelState> grid_;

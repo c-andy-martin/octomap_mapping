@@ -12,6 +12,9 @@ OcTreeStampedWithExpiry::OcTreeStampedWithExpiry(double resolution)
   , last_expire_time(0)
   , delete_minimum(false)
 {
+  // Set the free space mask to round to the nearest power of 2 of c_coeff_free_/10.0
+  uint32_t c_power_2 = (1 << (32 - __builtin_clz(static_cast<uint32_t>(std::floor(c_coeff_free_/10.0)))));
+  free_space_stamp_mask_ = ~(c_power_2 - 1);
   ocTreeStampedWithExpiryMemberInit.ensureLinking();
 }
 
@@ -223,9 +226,9 @@ bool OcTreeStampedWithExpiry::applyUpdateRecurs(
     bool leaf = (!child_created && !nodeHasChildren(child_node));
     bool child_at_min = (child_log_odds <= clamping_thres_min);
     bool child_at_max = (child_log_odds >= clamping_thres_max);
-    bool stamps_match = (child_node->getTimestamp() == getLastUpdateTime());
 
-    if (leaf && child_at_min && voxel_free_bit && !voxel_occupied_bit && stamps_match)
+    if (leaf && child_at_min && voxel_free_bit && !voxel_occupied_bit &&
+        child_node->getTimestamp() == getLastUpdateTimeFreeSpace())
     {
       // This leaf is at min and the voxel (and any sub voxels) are free (the
       // child voxel can be inner or a leaf in this case).
@@ -234,7 +237,8 @@ bool OcTreeStampedWithExpiry::applyUpdateRecurs(
       continue;
     }
 
-    if (leaf && child_at_max && voxel_is_leaf && voxel_occupied_bit && stamps_match)
+    if (leaf && child_at_max && voxel_is_leaf && voxel_occupied_bit &&
+        child_node->getTimestamp() == getLastUpdateTime())
     {
       // This leaf is at max, the voxel state is a leaf and occupied, and the
       // time stamps match.
@@ -362,9 +366,14 @@ OcTreeNodeStampedWithExpiry* OcTreeStampedWithExpiry::updateNode(const octomap::
   }
   // no change: node already at threshold
   if (leaf
-      && ((log_odds_update >= 0 && leaf->getLogOdds() >= this->clamping_thres_max)
-      || ( log_odds_update <= 0 && leaf->getLogOdds() <= this->clamping_thres_min))
+      && (log_odds_update >= 0 && leaf->getLogOdds() >= this->clamping_thres_max)
       && (leaf->getTimestamp() == getLastUpdateTime()))
+  {
+    return leaf;
+  }
+  if (leaf
+      && (log_odds_update <= 0 && leaf->getLogOdds() <= this->clamping_thres_min)
+      && (leaf->getTimestamp() == getLastUpdateTimeFreeSpace()))
   {
     return leaf;
   }
@@ -382,7 +391,12 @@ OcTreeNodeStampedWithExpiry* OcTreeStampedWithExpiry::updateNode(const octomap::
 void OcTreeStampedWithExpiry::updateNodeLogOdds(OcTreeNodeStampedWithExpiry* node, const float& update) const
 {
   super::updateNodeLogOdds(node, update);
-  node->setTimestamp(last_expire_time);
+  time_t new_stamp = last_expire_time;
+  if (!isNodeOccupied(node))
+  {
+    new_stamp &= free_space_stamp_mask_;
+  }
+  node->setTimestamp(new_stamp);
   // Because we will very likely observe the same space multiple times, we do
   // not want to update expiry just to have to update it again on the next
   // sensor cycle. Instead, set it to zero and re-calculate it when it is

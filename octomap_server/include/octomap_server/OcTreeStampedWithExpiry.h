@@ -105,6 +105,9 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
     // Time of last update
     time_t getLastUpdateTime() const {return last_expire_time;}
 
+    // Time of last update, masked by free space mask
+    time_t getLastUpdateTimeFreeSpace() const {return (last_expire_time & free_space_stamp_mask_);}
+
     // Remove all expired nodes.
     // This also calculates and stores any missing expiration times in the tree.
     // This function should be called periodically.
@@ -169,6 +172,12 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
     double quadratic_start_, quadratic_start_log_odds_;
     // Assume free space we just use a flat timeout for
     double c_coeff_free_;
+    // Relax time-stamp matching requirements for free-space
+    // This allows optimal pruning for free-space as we sense free-space at
+    // different time intervals.
+    // Free-space time is relaxed according to c_coeff_free. A power of 2 is
+    // chosen near 1/10th of c_coeff_free.
+    time_t free_space_stamp_mask_;
     // Used as the new value for updated nodes.
     // Only updated when calling expireNodes. This keeps our idea of time at
     // the resolution of our expiration rate check, which allows us to easily

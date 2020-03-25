@@ -158,7 +158,8 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
                            NodeType* node,
                            bool node_just_created,
                            const octomap::OcTreeKey& key,
-                           unsigned int depth);
+                           unsigned int depth,
+                           octomap::key_type center_offset_key);
     // Quadratic delta-t expiration coefficients. The input is the number of
     // times a particular mode was marked from the default value (which would
     // be the current logodds divided prob_hit_log).

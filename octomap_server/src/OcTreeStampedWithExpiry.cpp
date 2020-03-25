@@ -156,7 +156,7 @@ void OcTreeStampedWithExpiry::applyUpdate(const SensorUpdateKeyMap& update)
     tree_size++;
     created_root = true;
   }
-  if (applyUpdateRecurs(update, root, created_root, root_key, 0))
+  if (applyUpdateRecurs(update, root, created_root, root_key, 0, tree_max_val >> 1))
   {
     deleteNodeRecurs(root);
     root = nullptr;
@@ -168,7 +168,8 @@ bool OcTreeStampedWithExpiry::applyUpdateRecurs(
     OcTreeStampedWithExpiry::NodeType* node,
     bool node_just_created,
     const octomap::OcTreeKey& key,
-    unsigned int depth)
+    unsigned int depth,
+    octomap::key_type center_offset_key)
 {
   assert(node != nullptr);
   assert(depth < tree_depth);
@@ -180,7 +181,7 @@ bool OcTreeStampedWithExpiry::applyUpdateRecurs(
     expandNode(node);
   }
 
-  const octomap::key_type center_offset_key = octomap::computeCenterOffsetKey(depth, tree_max_val);
+  const octomap::key_type next_center_offset_key = center_offset_key >> 1;
   for (unsigned int i=0; i<8; ++i)
   {
     octomap::OcTreeKey child_key;
@@ -276,7 +277,7 @@ bool OcTreeStampedWithExpiry::applyUpdateRecurs(
     }
 
     // Need to go deeper in the tree. Recurs!
-    if (applyUpdateRecurs(update, child_node, child_created, child_key, next_depth))
+    if (applyUpdateRecurs(update, child_node, child_created, child_key, next_depth, next_center_offset_key))
     {
       deleteNodeChild(node, i);
     }

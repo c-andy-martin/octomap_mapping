@@ -23,7 +23,14 @@ public:
   void setDepth(unsigned int depth)
   {
     depth_ = depth;
-    center_key_ = (1 << (depth - 1));
+    if (depth == 0)
+    {
+      center_key_ = 0;
+    }
+    else
+    {
+      center_key_ = (1 << (depth - 1));
+    }
   }
 
   inline bool isKeyOutOfBounds(const octomap::OcTreeKey& key) const

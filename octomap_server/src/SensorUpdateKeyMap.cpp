@@ -8,9 +8,12 @@
 namespace octomap_server {
 
 SensorUpdateKeyMap::SensorUpdateKeyMap()
-  : free_cells_capacity_(0)
-  , truncate_floor_(false)
+  : voxel_volume_array_threshold_(0),
+    impl_(nullptr),
+    free_cells_capacity_(0),
+    truncate_floor_(false)
 {
+  setDepth(0);
   octomap::OcTreeKey min_key(std::numeric_limits<octomap::key_type>::min(),
                              std::numeric_limits<octomap::key_type>::min(),
                              std::numeric_limits<octomap::key_type>::min());

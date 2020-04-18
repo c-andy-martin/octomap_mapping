@@ -120,7 +120,7 @@ public:
   }
 
   /// Empty the sensor update key map
-  void clear() {impl_->clear();}
+  void clear();
   /// Return the state of the given voxel
   VoxelState find(const octomap::OcTreeKey& key) const;
 

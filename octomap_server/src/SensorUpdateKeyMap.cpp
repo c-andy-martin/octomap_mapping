@@ -460,6 +460,14 @@ bool SensorUpdateKeyMap::insert(const octomap::OcTreeKey& key, bool value)
   }
 }
 
+void SensorUpdateKeyMap::clear()
+{
+  for (auto& impl : impls_)
+  {
+    impl->clear();
+  }
+}
+
 void SensorUpdateKeyMap::setBounds(const octomap::OcTreeKey& min_key,
                                    const octomap::OcTreeKey& max_key)
 {

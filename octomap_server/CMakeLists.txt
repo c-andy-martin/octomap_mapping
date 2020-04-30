@@ -62,6 +62,9 @@ add_library(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME} ${LINK_LIBS})
 add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_gencfg)
 
+add_executable(octomap_server_minimal_node src/octomap_server_minimal_node.cpp)
+target_link_libraries(octomap_server_minimal_node ${LINK_LIBS})
+
 add_executable(octomap_server_node src/octomap_server_node.cpp)
 target_link_libraries(octomap_server_node ${PROJECT_NAME} ${LINK_LIBS})
 

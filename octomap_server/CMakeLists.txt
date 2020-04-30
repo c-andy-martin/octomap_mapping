@@ -59,6 +59,9 @@ target_link_libraries(${PROJECT_NAME}_color ${LINK_LIBS})
 add_dependencies(${PROJECT_NAME}_color ${PROJECT_NAME}_gencfg)
 target_compile_definitions(${PROJECT_NAME}_color PUBLIC COLOR_OCTOMAP_SERVER)
 
+add_executable(octomap_server_minimal_node src/octomap_server_minimal_node.cpp)
+target_link_libraries(octomap_server_minimal_node ${LINK_LIBS})
+
 add_executable(octomap_server_node src/octomap_server_node.cpp)
 target_link_libraries(octomap_server_node ${PROJECT_NAME} ${LINK_LIBS})
 

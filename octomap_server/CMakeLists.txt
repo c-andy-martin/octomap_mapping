@@ -91,6 +91,7 @@ target_link_libraries(octomap_color_server_nodelet ${PROJECT_NAME}_color ${LINK_
 install(TARGETS ${PROJECT_NAME} ${PROJECT_NAME}_color
   octomap_server_node
   octomap_color_server_node
+  octomap_server_minimal_node
   octomap_server_static
   octomap_server_multilayer
   octomap_saver

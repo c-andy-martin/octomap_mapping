@@ -90,6 +90,7 @@ target_link_libraries(octomap_server_nodelet ${PROJECT_NAME} ${LINK_LIBS})
 # install targets:
 install(TARGETS ${PROJECT_NAME}
   octomap_server_node
+  octomap_server_minimal_node
   octomap_server_static
   octomap_server_multilayer
   octomap_saver

@@ -98,12 +98,12 @@ int main(int argc, char** argv)
     }
 
     size_t node_count = 0;
-    octomap_msgs::Octomap msg;
-    msg.binary = true;
-    msg.header.frame_id = frame_id;
-    msg.depth = 16;
-    msg.resolution = 0.0;
-    msg.id = "";
+    octomap_msgs::OctomapPtr msg(new octomap_msgs::Octomap);
+    msg->binary = true;
+    msg->header.frame_id = frame_id;
+    msg->depth = 16;
+    msg->resolution = 0.0;
+    msg->id = "";
 
     std::string line;
     while (std::getline(infile, line))
@@ -113,13 +113,13 @@ int main(int argc, char** argv)
       ss >> first_word;
       if (first_word == "id")
       {
-        ss >> msg.id;
-        ROS_INFO_STREAM("id " << msg.id);
+        ss >> msg->id;
+        ROS_INFO_STREAM("id " << msg->id);
       }
       else if (first_word == "res")
       {
-        ss >> msg.resolution;
-        ROS_INFO_STREAM("resolution " << msg.resolution);
+        ss >> msg->resolution;
+        ROS_INFO_STREAM("resolution " << msg->resolution);
       }
       else if (first_word == "size")
       {
@@ -136,7 +136,7 @@ int main(int argc, char** argv)
                            << " invalid depth " << depth);
           exit(1);
         }
-        msg.depth = depth;
+        msg->depth = depth;
         ROS_INFO_STREAM("tree depth: " << depth);
       }
       else if (first_word == "data")
@@ -144,28 +144,28 @@ int main(int argc, char** argv)
         std::stringstream data_ss;
         infile >> data_ss.rdbuf();
         std::string msg_data = data_ss.str();
-        msg.data.assign(msg_data.begin(), msg_data.end());
+        msg->data.assign(msg_data.begin(), msg_data.end());
       }
     }
 
-    if (msg.resolution == 0.0)
+    if (msg->resolution == 0.0)
     {
       ROS_ERROR_STREAM("Unable to parse " << map_filename
                        << " could not read resolution");
       exit(1);
     }
-    if (msg.id.empty())
+    if (msg->id.empty())
     {
       ROS_ERROR_STREAM("Unable to parse " << map_filename
                        << " could not read id");
       exit(1);
     }
-    if (msg.data.empty() && node_count > 0)
+    if (msg->data.empty() && node_count > 0)
     {
       ROS_ERROR_STREAM("Unable to parse " << map_filename
                        << " data size mismatch. Header says there are "
                        << node_count << " nodes but actually read "
-                       << msg.data.size() << " bytes.");
+                       << msg->data.size() << " bytes.");
       exit(1);
     }
     // The message will stay latched in the publisher, so there is no need to

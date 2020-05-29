@@ -32,6 +32,7 @@
 
 #include <ros/ros.h>
 #include <octomap_msgs/Octomap.h>
+#include <octomap/OcTreeKey.h>
 
 int main(int argc, char** argv)
 {
@@ -127,8 +128,16 @@ int main(int argc, char** argv)
       }
       else if (first_word == "depth")
       {
-        ss >> msg.depth;
-        ROS_INFO_STREAM("tree depth: " << msg.depth);
+        unsigned int depth;
+        ss >> depth;
+        if (depth > octomap::KEY_BIT_WIDTH)
+        {
+          ROS_ERROR_STREAM("Unable to parse " << map_filename
+                           << " invalid depth " << depth);
+          exit(1);
+        }
+        msg.depth = depth;
+        ROS_INFO_STREAM("tree depth: " << depth);
       }
       else if (first_word == "data")
       {

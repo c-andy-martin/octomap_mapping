@@ -2011,7 +2011,6 @@ void OctomapServer::touchKey(const OcTreeKey& key)
 
 void OctomapServer::enableChangeCallback()
 {
-  m_octree->enableChangeDetection(true);
   m_octree->registerValueChangeCallback(boost::bind(&OctomapServer::valueChangeCallback, this,
       _1, _2, _3, _4, _5, _6, _7));
 }
@@ -2019,7 +2018,6 @@ void OctomapServer::enableChangeCallback()
 void OctomapServer::disableChangeCallback()
 {
   m_octree->unregisterValueChangeCallback();
-  m_octree->enableChangeDetection(false);
 }
 
 void OctomapServer::valueChangeCallback(const OcTreeKey& key, unsigned int depth, const bool node_just_created,

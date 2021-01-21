@@ -92,12 +92,23 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase <OcTreeNodeS
     // (Covariant return type requires an up-to-date compiler)
     OcTreeStampedWithExpiry* create() const {return new OcTreeStampedWithExpiry(resolution); }
 
-    void setQuadraticParameters(double a_coeff, double c_coeff, double quadratic_start, double c_coeff_free)
+    void setQuadraticParameters(double a_coeff, double c_coeff, double quadratic_start, double c_coeff_free, bool log=true)
     {
       a_coeff_ = a_coeff;
       c_coeff_ = c_coeff;
       quadratic_start_ = quadratic_start;
       c_coeff_free_ = c_coeff_free;
+      // Set the free space mask to round to the nearest power of 2 of c_coeff_free_/10.0
+      uint32_t c_power_2 = (1 << (32 - __builtin_clz(static_cast<uint32_t>(std::floor(c_coeff_free_/10.0)))));
+      free_space_stamp_mask_ = ~(c_power_2 - 1);
+      if (log)
+      {
+        ROS_INFO_STREAM("Set quadratic parameters a_coeff: " << a_coeff_ <<
+                        " c_coeff: " << c_coeff_ <<
+                        " c_coeff_free: " << c_coeff_free_ <<
+                        " quadratic_start: " << quadratic_start_ <<
+                        " free_space_stamp_mask: " << std::hex << free_space_stamp_mask_);
+      }
     }
 
     std::string getTreeType() const {return "OcTree";}

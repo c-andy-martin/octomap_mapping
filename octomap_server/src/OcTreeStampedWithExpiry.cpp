@@ -5,17 +5,14 @@ namespace octomap_server {
 
 OcTreeStampedWithExpiry::OcTreeStampedWithExpiry(double resolution)
   : super(resolution)
-  , a_coeff_(1.0 / 25.0)
-  , c_coeff_(2.0)
-  , quadratic_start_(30.0)
-  , c_coeff_free_(60.0*60.0*18.0)
   , last_expire_time(0)
   , delete_minimum(false)
 {
-  // Set the free space mask to round to the nearest power of 2 of c_coeff_free_/10.0
-  uint32_t c_power_2 = (1 << (32 - __builtin_clz(static_cast<uint32_t>(std::floor(c_coeff_free_/10.0)))));
-  free_space_stamp_mask_ = ~(c_power_2 - 1);
+  // Set the occupancy threshold to log odds zero.
+  occ_prob_thres_log = 0.0;
   ocTreeStampedWithExpiryMemberInit.ensureLinking();
+  // Set the quadratic parameters to some defaults
+  setQuadraticParameters(1.0, 3.0, 0.0, 60.0, false);
 }
 
 void OcTreeStampedWithExpiry::expireNodes(NodeChangeNotification change_notification /* = NodeChangeNotification() */,

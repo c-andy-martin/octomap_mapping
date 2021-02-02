@@ -357,7 +357,7 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   }
 
   // If we have not subscribed to any topics, subscribe to default "cloud_in"
-  if (m_pointCloudSubs.empty()) {
+  if (m_pointCloudSubs.empty() && m_syncs.empty()) {
     addCloudTopic("cloud_in");
   }
 

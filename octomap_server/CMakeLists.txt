@@ -41,21 +41,21 @@ set(LINK_LIBS
   ${catkin_LIBRARIES}
 )
 
-add_library(${PROJECT_NAME}
-  src/OctomapServer.cpp
-  src/OctomapServerMultilayer.cpp
-  src/TrackingOctomapServer.cpp
+add_library(${PROJECT_NAME}_common
   src/PointCloudSynchronizer.cpp
   src/SensorUpdateKeyMap.cpp
   src/SensorUpdateKeyMapHashImpl.cpp
   src/SensorUpdateKeyMapArrayImpl.cpp
   src/OcTreeStampedWithExpiry.cpp
 )
-target_link_libraries(${PROJECT_NAME} ${LINK_LIBS})
+target_link_libraries(${PROJECT_NAME}_common ${LINK_LIBS})
+
+add_library(${PROJECT_NAME} src/OctomapServer.cpp src/OctomapServerMultilayer.cpp src/TrackingOctomapServer.cpp)
+target_link_libraries(${PROJECT_NAME} ${PROJECT_NAME}_common ${LINK_LIBS})
 add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_gencfg)
 
 add_library(${PROJECT_NAME}_color src/OctomapServer.cpp src/OctomapServerMultilayer.cpp src/TrackingOctomapServer.cpp)
-target_link_libraries(${PROJECT_NAME}_color ${LINK_LIBS})
+target_link_libraries(${PROJECT_NAME}_color ${PROJECT_NAME}_common ${LINK_LIBS})
 add_dependencies(${PROJECT_NAME}_color ${PROJECT_NAME}_gencfg)
 target_compile_definitions(${PROJECT_NAME}_color PUBLIC COLOR_OCTOMAP_SERVER)
 

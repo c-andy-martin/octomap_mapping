@@ -4,6 +4,7 @@
 #include <ctime>
 #include <algorithm>
 #include <limits>
+#include <type_traits>
 #include <stdlib.h>
 #include <ros/ros.h>
 #include <octomap/OccupancyOcTreeBase.h>
@@ -113,7 +114,18 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase<OcTreeNodeSt
       }
     }
 
-    std::string getTreeType() const {return "OcTree";}
+    // FIXME: until this class is in a library that the octomap_rviz_plugin is
+    // using, pretend we are the base tree for serializing so that the
+    // octomap_rviz_plugin can visualize this octree. Once the
+    // octomap_rviz_plugin can parse and understand this type of tree, change
+    // to the correct value and also remove the commented line below commenting
+    // out registerTreeType inside of the StaticMemberInitializer.
+    std::string getTreeType() const {
+      if (std::is_same<octomap::ColorOcTreeNode, OcTreeNodeBase>()) {
+        return "ColorOcTree";
+      }
+      return "OcTree";
+    }
 
     // Time of last update
     time_t getLastUpdateTime() const {return last_expire_time;}

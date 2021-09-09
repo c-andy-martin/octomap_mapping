@@ -6,10 +6,10 @@ namespace octomap_server {
 
 // Provide the storage for the static ocTreeStampedWithExpiryMemberInit for OcTreeNode
 template <>
-OcTreeStampedWithExpiry<octomap::OcTreeNode>::StaticMemberInitializer OcTreeStampedWithExpiry<octomap::OcTreeNode>::ocTreeStampedWithExpiryMemberInit;
+OcTreeStampedWithExpiry<octomap::OcTreeNode>::StaticMemberInitializer OcTreeStampedWithExpiry<octomap::OcTreeNode>::ocTreeStampedWithExpiryMemberInit{};
 
 // Provide the storage for the static ocTreeStampedWithExpiryMemberInit for ColorOcTreeNode
 template <>
-OcTreeStampedWithExpiry<octomap::ColorOcTreeNode>::StaticMemberInitializer OcTreeStampedWithExpiry<octomap::ColorOcTreeNode>::ocTreeStampedWithExpiryMemberInit;
+OcTreeStampedWithExpiry<octomap::ColorOcTreeNode>::StaticMemberInitializer OcTreeStampedWithExpiry<octomap::ColorOcTreeNode>::ocTreeStampedWithExpiryMemberInit{};
 
 } // end namespace

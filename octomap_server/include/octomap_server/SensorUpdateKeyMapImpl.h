@@ -34,6 +34,7 @@ public:
   // and want a voxel with both a ground and non-ground point to be always
   // counted as occupeid.
   virtual bool insertFree(const octomap::OcTreeKey& key) = 0;
+  // This call only works on level 0 maps, as it is an optimization.
   virtual bool insertFreeCells(const octomap::OcTreeKey *free_cells, size_t free_cells_count) = 0;
   virtual bool insertOccupied(const octomap::OcTreeKey& key) = 0;
   // Insert an inner voxel at the given key.

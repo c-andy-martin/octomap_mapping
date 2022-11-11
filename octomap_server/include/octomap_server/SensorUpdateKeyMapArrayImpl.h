@@ -45,6 +45,21 @@ private:
     }
     return 0;
   }
+  // Very fast implementation when it is known to be at level 0.
+  // Static for speed, the caller should sample min_key, dims_[0] and skip_ to
+  // locals (this method is mainly useful in tight loops for speed).
+  static inline unsigned int calculateIndexLevel0(
+      const octomap::OcTreeKey& key,
+      const octomap::OcTreeKey& min_key,
+      unsigned int width,
+      unsigned int skip)
+  {
+    const unsigned int i = (key[0] - min_key[0]);
+    const unsigned int j = (key[1] - min_key[1]);
+    const unsigned int k = (key[2] - min_key[2]);
+    unsigned int rv = i + j*width + k*skip;
+    return rv;
+  }
 
   // NOTE: does no bounds checking at all. It is assumed that
   // SensorUpdateKeyMap does the bounds checking.

@@ -96,6 +96,10 @@ bool SensorUpdateKeyMap::insertFreeRay(const octomap::OcTreeSpace& tree,
   {
     return false;
   }
+  if (isKeyOutOfBounds(end_key))
+  {
+    return false;
+  }
   // Nothing to do if origin and end are in same cell
   if (origin_key == end_key)
   {
@@ -173,9 +177,10 @@ bool SensorUpdateKeyMap::insertFreeRay(const octomap::OcTreeSpace& tree,
   // Incremental phase
   for (;;)
   {
-    // We have moved out-of-bounds, stop tracing
-    if (isKeyOutOfBounds(current_key))
-      break;
+    // Both origin and end are known to be in bounds, and bounds are axis-aligned.
+    // It is therefore impossible to trace-out-of-bounds.
+    // Assert this for testing.
+    assert(!isKeyOutOfBounds(current_key));
 
     // add the cell
     free_cells[free_cells_count++] = current_key;

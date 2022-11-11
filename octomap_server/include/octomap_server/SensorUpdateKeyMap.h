@@ -60,6 +60,7 @@ public:
 
   void clampRayToBounds(const octomap::OcTreeSpace& tree, const octomap::point3d& origin, octomap::point3d* end) const;
   bool insertFree(const octomap::OcTreeKey& key) {return insert(key, false);}
+  // Returns false if origin or end are out of bounds or if they map to the same key.
   bool insertFreeRay(const octomap::OcTreeSpace& tree, const octomap::point3d& origin, const octomap::point3d& end);
   bool insertOccupied(const octomap::OcTreeKey& key) {return insert(key, true);}
   /** Insert a ray, optionally marking or clearing the end.

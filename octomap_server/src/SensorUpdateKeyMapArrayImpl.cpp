@@ -53,18 +53,24 @@ bool SensorUpdateKeyMapArrayImpl::insertFree(const octomap::OcTreeKey& key)
 
 bool SensorUpdateKeyMapArrayImpl::insertFreeCells(const octomap::OcTreeKey *free_cells, size_t free_cells_count)
 {
+  if (level_ != 0)
+    return false;
   if (free_cells_count == 0)
     return false;
   VoxelState* grid = grid_.data();
-  while (free_cells_count > 0)
+  const octomap::OcTreeKey min_key = min_key_;
+  unsigned int width = dims_[0];
+  unsigned int skip = skip_;
+  size_t index = 0;
+  while (index < free_cells_count)
   {
-    VoxelState* grid_loc = grid + calculateIndex(*free_cells);
-    if (*grid_loc == voxel_state::UNKNOWN)
-    {
-      *grid_loc = voxel_state::FREE;
-    }
-    ++free_cells;
-    --free_cells_count;
+    VoxelState* grid_loc = grid + calculateIndexLevel0(*(free_cells + index), min_key, width, skip);
+    VoxelState state = *grid_loc;
+    // As odd as it may seem, through instrumentation it is more efficient to
+    // set the value back again and avoid the branch than to avoid setting the
+    // value and taking a branch due to branch prediction effects.
+    *grid_loc = (state == voxel_state::UNKNOWN ? voxel_state::FREE : state);
+    ++index;
   }
   return true;
 }

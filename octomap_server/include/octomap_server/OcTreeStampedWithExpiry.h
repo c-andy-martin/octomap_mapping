@@ -1,11 +1,12 @@
 #ifndef OCTOMAP_OCTREE_STAMPED_NONLINEAR_DECAY_H
 #define OCTOMAP_OCTREE_STAMPED_NONLINEAR_DECAY_H
 
-#include <ctime>
 #include <algorithm>
+#include <cmath>
+#include <ctime>
 #include <limits>
 #include <type_traits>
-#include <stdlib.h>
+
 #include <ros/ros.h>
 #include <octomap/OccupancyOcTreeBase.h>
 #include <octomap_server/SensorUpdateKeyMap.h>
@@ -95,22 +96,59 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase<OcTreeNodeSt
     // (Covariant return type requires an up-to-date compiler)
     OcTreeStampedWithExpiry<OcTreeNodeBase>* create() const {return new OcTreeStampedWithExpiry<OcTreeNodeBase>(this->resolution); }
 
-    void setQuadraticParameters(double a_coeff, double c_coeff, double quadratic_start, double c_coeff_free, bool log=true)
+    // Get the expiration time offset to add for a given number of hits (log odds / probablity of hit in log odds)
+    inline time_t getExpiryDelta(double num_hits) const
     {
-      a_coeff_ = a_coeff;
-      c_coeff_ = c_coeff;
-      quadratic_start_ = quadratic_start;
-      c_coeff_free_ = c_coeff_free;
-      // Set the free space mask to round to the nearest power of 2 of c_coeff_free_/10.0
-      uint32_t c_power_2 = (1 << (32 - __builtin_clz(static_cast<uint32_t>(std::floor(c_coeff_free_/10.0)))));
+      return static_cast<time_t>(std::round(d_coeff_ + a_coeff_ * std::exp(b_coeff_ * std::exp(c_coeff_ * num_hits))));
+    }
+
+    // Calculates the Gopmertz curve coefficients from the two horizontal
+    // asymptotes and two points on the curve. Free-space is a simple
+    // constant-offset expiration.
+    void setExpiryParameters(
+        double expiry_at_neg_inf,
+        double expiry_at_pos_inf,
+        double expiry_at_x1,
+        double x1,
+        double expiry_at_x2,
+        double x2,
+        double expiry_free,
+        bool log=true)
+    {
+      // Our modified Gompertz curve is given by f(x) = a_coeff * exp(b_coeff * exp(c_coeff * x)) + d_coeff
+      // Directly use the asymptotic values
+      a_coeff_ = (expiry_at_pos_inf - expiry_at_neg_inf);
+      d_coeff_ = expiry_at_neg_inf;
+      // Solve the b and c Gompertz curve parameters using the two given points
+      double log_q1 = std::log((expiry_at_x1 - d_coeff_) / a_coeff_);
+      double log_q2 = std::log((expiry_at_x2 - d_coeff_) / a_coeff_);
+      c_coeff_ = std::log(log_q1 / log_q2) / (x1 - x2);
+      b_coeff_ = log_q1 / std::exp(c_coeff_ * x1);
+      expiry_free_ = expiry_free;
+      // Set the free space mask to round to the nearest power of 2 of expiry_free_/10.0
+      uint32_t c_power_2 = (1 << (32 - __builtin_clz(static_cast<uint32_t>(std::floor(expiry_free_/10.0)))));
       free_space_stamp_mask_ = ~(c_power_2 - 1);
       if (log)
       {
-        ROS_INFO_STREAM("Set quadratic parameters a_coeff: " << a_coeff_ <<
-                        " c_coeff: " << c_coeff_ <<
-                        " c_coeff_free: " << c_coeff_free_ <<
-                        " quadratic_start: " << quadratic_start_ <<
-                        " free_space_stamp_mask: " << std::hex << free_space_stamp_mask_);
+        ROS_INFO_STREAM(
+            "Set expiry parameters:\n"
+            "Gompertz curve for expiration on number of hits:\n"
+            "\ta_coeff: " << a_coeff_ << "\n"
+            "\tb_coeff: " << b_coeff_ << "\n"
+            "\tc_coeff: " << c_coeff_ << "\n"
+            "\td_coeff: " << d_coeff_ << "\n"
+            "\tCurve points:\n"
+            "\tf(0) = " << getExpiryDelta(0) << "\n"
+            "\tf(" << x1/4 << ") = " << getExpiryDelta(x1/4) << "\n"
+            "\tf(" << x1/2 << ") = " << getExpiryDelta(x1/2) << "\n"
+            "\tf(" << x1 << ") = " << getExpiryDelta(x1) << "\n"
+            "\tf(" << (x1+x2)/2 << ") = " << getExpiryDelta((x1+x2)/2) << "\n"
+            "\tf(" << x2 << ") = " << getExpiryDelta(x2) << "\n"
+            "\tf(" << (x2+getMaxNumberOfHits())/2 << ") = " << getExpiryDelta((x2+getMaxNumberOfHits())/2) << "\n"
+            "\tf(" << getMaxNumberOfHits() << ") = " << getMaxExpiryDelta() << "\n"
+            "Free space:\n"
+            "\tfixed delta expiry: " << expiry_free_ << "\n"
+            "\tfree_space_stamp_mask: " << std::hex << free_space_stamp_mask_);
       }
     }
 
@@ -163,8 +201,12 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase<OcTreeNodeSt
     bool getSizeChanged() {return this->size_changed;}
     void setSizeChanged(bool new_value) {this->size_changed = new_value;}
 
-    time_t getMaxExpiryDelta() const {
-      return a_coeff_log_odds_* this->clamping_thres_max * this->clamping_thres_max + c_coeff_;
+    inline double getMaxNumberOfHits() const {
+      return (this->clamping_thres_max - this->occ_prob_thres_log) / this->prob_hit_log;
+    }
+
+    inline time_t getMaxExpiryDelta() const {
+      return getExpiryDelta(getMaxNumberOfHits());
     }
 
     /// When a node is updated to the minimum, delete it if present and do not store
@@ -188,20 +230,25 @@ class OcTreeStampedWithExpiry : public octomap::OccupancyOcTreeBase<OcTreeNodeSt
                            const octomap::OcTreeKey& key,
                            unsigned int depth,
                            octomap::key_type center_offset_key);
-    // Quadratic delta-t expiration coefficients. The input is the number of
-    // times a particular mode was marked from the default value (which would
-    // be the current logodds divided prob_hit_log).
-    double a_coeff_, a_coeff_log_odds_;
-    // Assume b_coeff is always zero
-    double c_coeff_;
-    double quadratic_start_, quadratic_start_log_odds_;
-    // Assume free space we just use a flat timeout for
-    double c_coeff_free_;
+    // Gompertz delta-t expiration coefficients. The input is the number of
+    // times a particular node was marked from the default value (which would
+    // be the current logodds divided prob_hit_log). The Gompertz curve is
+    // shifted up by d_coeff_, and the negative b and c coefficients are used
+    // so the function is:
+    // expiry = a_coeff_ * exp(b_coeff_ * exp(c_coeff_ * num_hits)) + d_coeff_
+    double a_coeff_, b_coeff_, c_coeff_, d_coeff_;
+    // Free space uses a fixed delta time offset for expiry. This is much more
+    // efficient, as free space generally takes up more volume and is denser
+    // than occupied space. The negative navigation effects of latching onto
+    // false free space are generally mild compared to latching onto false
+    // obstacles. The memory efficiency is further improved by relaxing the
+    // matching requirments below.
+    double expiry_free_;
     // Relax time-stamp matching requirements for free-space
     // This allows optimal pruning for free-space as we sense free-space at
     // different time intervals.
-    // Free-space time is relaxed according to c_coeff_free. A power of 2 is
-    // chosen near 1/10th of c_coeff_free.
+    // Free-space time is relaxed according to expiry_free. A power of 2 is
+    // chosen near 1/10th of expiry_free.
     time_t free_space_stamp_mask_;
     // Used as the new value for updated nodes.
     // Only updated when calling expireNodes. This keeps our idea of time at
@@ -258,8 +305,8 @@ OcTreeStampedWithExpiry<OcTreeNodeBase>::OcTreeStampedWithExpiry(double resoluti
   // Set the occupancy threshold to log odds zero.
   this->occ_prob_thres_log = 0.0;
   ocTreeStampedWithExpiryMemberInit.ensureLinking();
-  // Set the quadratic parameters to some defaults
-  setQuadraticParameters(1.0, 3.0, 0.0, 60.0, false);
+  // Set the expiry parameters to some defaults
+  setExpiryParameters(2.0, 5.0 * 60.0, 10.0, 15.0, 60.0, 30.0, 5.0 * 60.0, false);
 }
 
 template <typename OcTreeNodeBase>
@@ -269,10 +316,6 @@ void OcTreeStampedWithExpiry<OcTreeNodeBase>::expireNodes(
 {
   octomap::OcTreeKey rootKey(this->tree_max_val, this->tree_max_val, this->tree_max_val);
   last_expire_time = ros::Time::now().sec;
-
-  // pre-compute a_coeff in terms of log-odds instead of number of observations
-  a_coeff_log_odds_ = a_coeff_ * (1.0 / this->prob_hit_log) * (1.0 / this->prob_hit_log);
-  quadratic_start_log_odds_ = quadratic_start_ * this->prob_hit_log;
 
   if (this->root != NULL)
   {
@@ -355,21 +398,16 @@ bool OcTreeStampedWithExpiry<OcTreeNodeBase>::expireNodeRecurs(
       // Leaf, update expiry if 0
       if (expiry == 0)
       {
-        const double value = node->getLogOdds();
-        if (value < this->occ_prob_thres_log)
+        const double num_hits = (node->getLogOdds() - this->occ_prob_thres_log) / this->prob_hit_log;
+        if (num_hits < 0)
         {
-          // free space
-          expiry = node->getTimestamp() + c_coeff_free_;
+          // free space, fixed time offset
+          expiry = node->getTimestamp() + expiry_free_;
         }
         else
         {
-          // occupied space
-          expiry = node->getTimestamp() + c_coeff_;
-          const double v = (value - quadratic_start_log_odds_);
-          if (v > 0.0)
-          {
-            expiry += a_coeff_log_odds_ * v * v;
-          }
+          // occupied space, parameterized Gompertz curve time offset
+          expiry = node->getTimestamp() + getExpiryDelta(num_hits);
         }
         node->setExpiry(expiry);
       }

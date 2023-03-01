@@ -228,12 +228,28 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_maxTreeDepth = m_treeDepth;
   m_gridmap.info.resolution = m_res;
 
-  double a_coeff, c_coeff, quadratic_start, c_coeff_free;
-  m_nh_private.param("expiry/a_coeff", a_coeff, 1.0 / 25.0);
-  m_nh_private.param("expiry/c_coeff", c_coeff, 2.0);
-  m_nh_private.param("expiry/quadratic_start", quadratic_start, 30.0);
-  m_nh_private.param("expiry/c_coeff_free", c_coeff_free, 60.0 * 60.0 * 18.0);
-  m_octree->setQuadraticParameters(a_coeff, c_coeff, quadratic_start, c_coeff_free);
+  double expiry_at_neg_inf;
+  double expiry_at_pos_inf;
+  double expiry_at_x1;
+  double expiry_x1;
+  double expiry_at_x2;
+  double expiry_x2;
+  double expiry_free;
+  m_nh_private.param("expiry/at_negative_infinity", expiry_at_neg_inf, 2.0);
+  m_nh_private.param("expiry/at_positive_infinity", expiry_at_pos_inf, 5.0 * 60.0);
+  m_nh_private.param("expiry/at_x1", expiry_at_x1, 10.0);
+  m_nh_private.param("expiry/x1", expiry_x1, 15.0);
+  m_nh_private.param("expiry/at_x2", expiry_at_x2, 60.0);
+  m_nh_private.param("expiry/x2", expiry_x2, 30.0);
+  m_nh_private.param("expiry/free_space", expiry_free, 5.0 * 60.0);
+  m_octree->setExpiryParameters(
+      expiry_at_neg_inf,
+      expiry_at_pos_inf,
+      expiry_at_x1,
+      expiry_x1,
+      expiry_at_x2,
+      expiry_x2,
+      expiry_free);
   // get expiration time setup
   m_octree->expireNodes();
 

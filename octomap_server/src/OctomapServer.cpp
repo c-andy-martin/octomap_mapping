@@ -777,9 +777,10 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   point3d sensorOrigin = pointTfToOctomap(sensorOriginTf);
   OcTreeKey originKey;
 
-  if (!m_octree->coordToKeyChecked(sensorOrigin, originKey)
+  if (!m_octree->coordToKeyChecked(sensorOrigin, originKey))
   {
-    ROS_ERROR_STREAM("Could not generate Key for origin "<<sensorOrigin);
+    ROS_ERROR_STREAM("Could not generate Key for sensor origin " << sensorOrigin);
+    return;
   }
 
 #ifdef COLOR_OCTOMAP_SERVER
@@ -830,53 +831,6 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
     applyUpdate();
   }
 
-  // Prune map if past period
-  bool pruned = false;
-  ros::Time now = ros::Time::now();
-  if (m_compressMap) {
-    if (now >= m_compressLastTime + ros::Duration(m_compressPeriod)) {
-      m_compressLastTime = now;
-      m_octree->prune();
-      pruned = true;
-    }
-  }
-
-  // Expire if necessary, skip if we just did a pruning cycle
-  // (We don't want to do both in one update, as they are both expensive)
-  if (!pruned && m_expirePeriod > 0.0) {
-    if (now >= m_expireLastTime + ros::Duration(m_expirePeriod)) {
-      m_expireLastTime = now;
-      m_octree->expireNodes(boost::bind(&OctomapServer::touchKeyAtDepth, this, _1, _2));
-    }
-  }
-
-  // Delete based on distance periodically.
-  if (m_baseDistanceLimitPeriod > 0.0)
-  {
-    if (m_baseToWorldValid && now >= m_baseDistanceLimitLastTime + ros::Duration(m_baseDistanceLimitPeriod)) {
-      m_baseDistanceLimitLastTime = now;
-      tf::Vector3 origin = m_baseToWorldTf.getOrigin();
-      std::stringstream ss;
-      ss << "Limiting ";
-      if (m_base2DDistanceLimit < m_octree->keyToCoord(std::numeric_limits<octomap::key_type>::max())) {
-        ss << "2D distance to " << m_base2DDistanceLimit;
-      }
-      if (m_baseHeightLimit < m_octree->keyToCoord(std::numeric_limits<octomap::key_type>::max())) {
-        ss << " height to " << m_baseHeightLimit;
-      }
-      if (m_baseDepthLimit < m_octree->keyToCoord(std::numeric_limits<octomap::key_type>::max())) {
-        ss << " depth to " << m_baseDepthLimit;
-      }
-      ss << " from (" << origin.x() << ", " << origin.y() << ", " << origin.z() << ")";
-      ROS_DEBUG_STREAM(ss.str());
-      octomap::point3d base_position(origin.x(), origin.y(), origin.z());
-      m_octree->outOfBounds(m_base2DDistanceLimit, m_baseHeightLimit, m_baseDepthLimit, base_position,
-          boost::bind(&OctomapServer::touchKeyAtDepth, this, _3, _4));
-    }
-  }
-
-
-  publishAll(ros::Time::now());
 #ifdef COLOR_OCTOMAP_SERVER
   if (colors)
   {
@@ -1007,6 +961,47 @@ void OctomapServer::publishAll(const ros::Time& rostime){
   if (m_deferUpdateToPublish)
   {
     applyUpdate();
+  }
+
+  // Delete based on distance periodically.
+  if (m_baseDistanceLimitPeriod > 0.0)
+  {
+    if (m_baseToWorldValid && rostime >= m_baseDistanceLimitLastTime + ros::Duration(m_baseDistanceLimitPeriod)) {
+      m_baseDistanceLimitLastTime = rostime;
+      tf::Vector3 origin = m_baseToWorldTf.getOrigin();
+      std::stringstream ss;
+      ss << "Limiting ";
+      if (m_base2DDistanceLimit < m_octree->keyToCoord(std::numeric_limits<octomap::key_type>::max())) {
+        ss << "2D distance to " << m_base2DDistanceLimit;
+      }
+      if (m_baseHeightLimit < m_octree->keyToCoord(std::numeric_limits<octomap::key_type>::max())) {
+        ss << " height to " << m_baseHeightLimit;
+      }
+      if (m_baseDepthLimit < m_octree->keyToCoord(std::numeric_limits<octomap::key_type>::max())) {
+        ss << " depth to " << m_baseDepthLimit;
+      }
+      ss << " from (" << origin.x() << ", " << origin.y() << ", " << origin.z() << ")";
+      ROS_DEBUG_STREAM(ss.str());
+      octomap::point3d base_position(origin.x(), origin.y(), origin.z());
+      m_octree->outOfBounds(m_base2DDistanceLimit, m_baseHeightLimit, m_baseDepthLimit, base_position,
+          boost::bind(&OctomapServer::touchKeyAtDepth, this, _3, _4));
+    }
+  }
+
+  // Expire if necessary
+  if (m_expirePeriod > 0.0) {
+    if (rostime >= m_expireLastTime + ros::Duration(m_expirePeriod)) {
+      m_expireLastTime = rostime;
+      m_octree->expireNodes(boost::bind(&OctomapServer::touchKeyAtDepth, this, _1, _2));
+    }
+  }
+
+  // Prune map if past period
+  if (m_compressMap) {
+    if (rostime >= m_compressLastTime + ros::Duration(m_compressPeriod)) {
+      m_compressLastTime = rostime;
+      m_octree->prune();
+    }
   }
 
   if (publish_3d) {

@@ -775,11 +775,9 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
                           const PCLPointCloud& nonmarking_nonground)
 {
   point3d sensorOrigin = pointTfToOctomap(sensorOriginTf);
-  OcTreeKey originKey = m_octree->coordToKey(sensorOrigin);
-  point3d originBoundary = m_octree->keyToCoord(originKey);
+  OcTreeKey originKey;
 
-  if (!m_octree->coordToKeyChecked(sensorOrigin, m_updateBBXMin)
-    || !m_octree->coordToKeyChecked(sensorOrigin, m_updateBBXMax))
+  if (!m_octree->coordToKeyChecked(sensorOrigin, originKey)
   {
     ROS_ERROR_STREAM("Could not generate Key for origin "<<sensorOrigin);
   }

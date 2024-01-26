@@ -64,6 +64,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_publish3DMapLastTime(ros::Time::now()),
   m_publish2DLastTime(ros::Time::now()),
   m_publish3DMapUpdateLastTime(ros::Time::now()),
+  m_expectedSensorRate(0.0),
   m_newFullSub(false),
   m_newBinarySub(false),
   m_res(0.05),
@@ -148,6 +149,19 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_nh_private.param("sensor_model/miss", probMiss, 0.4);
   m_nh_private.param("sensor_model/min", thresMin, 0.12);
   m_nh_private.param("sensor_model/max", thresMax, 0.97);
+  m_nh_private.param("sensor_model/expected_rate", m_expectedSensorRate, 0.0);
+  if (m_expectedSensorRate > 0.0)
+  {
+    double hit_per_second;
+    double miss_per_second;
+    // Make the defaults based on the original sensor model parameters in case
+    // the new per second parameters are not set.
+    m_nh_private.param("sensor_model/hit_per_second", hit_per_second, octomap::probability(octomap::logodds(probHit) * m_expectedSensorRate));
+    m_nh_private.param("sensor_model/miss_per_second", miss_per_second, octomap::probability(octomap::logodds(probMiss) * m_expectedSensorRate));
+    // Convert seconds to hits using the expected sensor rate
+    probHit = octomap::probability(octomap::logodds(hit_per_second) / m_expectedSensorRate);
+    probMiss = octomap::probability(octomap::logodds(miss_per_second) / m_expectedSensorRate);
+  }
   m_nh_private.param("compress_map", m_compressMap, m_compressMap);
   m_nh_private.param("compress_period", m_compressPeriod, m_compressPeriod);
   m_nh_private.param("incremental_2D_projection", m_incrementalUpdate, m_incrementalUpdate);
@@ -613,6 +627,18 @@ void OctomapServer::insertSegmentedCloudCallback(
     const std::string& sensor_origin_frame_id,
     unsigned int callback_id)
 {
+  if (m_expectedSensorRate > 0.0)
+  {
+    // Estimate the callback rate for reporting if the rate does not match m_expectedSensorRate
+    m_callbackRates[callback_id].update();
+    if (m_callbackRates[callback_id].valid() &&
+        !m_callbackRates[callback_id].rateIsApproximately(m_expectedSensorRate))
+    {
+      ROS_WARN_STREAM_THROTTLE(10.0, "Sensor for frame " << sensor_origin_frame_id <<
+          " not updating at configured rate. Expected rate: " << m_expectedSensorRate <<
+          ", actual update rate: " << m_callbackRates[callback_id].getCurrentRate());
+    }
+  }
   if (m_callbackCounts[callback_id] < m_callbackSkipCount)
   {
     // skip the callback until we are at the skip count

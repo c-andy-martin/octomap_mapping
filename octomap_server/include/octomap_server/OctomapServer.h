@@ -76,6 +76,7 @@
 #endif
 
 #include <octomap_server/types.h>
+#include <octomap_server/CallbackRate.h>
 #include <octomap_server/PointCloudSynchronizer.h>
 #include <octomap_server/OcTreeStampedWithExpiry.h>
 #include <octomap_server/SensorUpdateKeyMap.h>
@@ -154,6 +155,7 @@ protected:
 
     int callback_id = m_callbackCounts.size();
     m_callbackCounts.push_back(0);
+    m_callbackRates.push_back(CallbackRate());
     std::vector<std::string> callback_topics;
     callback_topics.resize(4);
     callback_topics[0] = ground_topic;
@@ -334,6 +336,7 @@ protected:
   bool m_latchedTopics;
   int m_callbackSkipCount;
   std::vector<unsigned int> m_callbackCounts;
+  std::vector<CallbackRate> m_callbackRates;
   std::vector<std::vector<std::string>> m_callbackTopics;
   bool m_trackFreeSpace;
   bool m_publishFreeSpace;
@@ -347,6 +350,7 @@ protected:
   ros::Time m_publish3DMapUpdateLastTime;
   double m_publish2DPeriod;
   ros::Time m_publish2DLastTime;
+  double m_expectedSensorRate;
 
   double m_res;
   unsigned m_treeDepth;
